@@ -1,0 +1,55 @@
+name: CrispVoice
+options:
+  bundleIdPrefix: com.crispvoice
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+packages:
+  HotKey:
+    url: https://github.com/soffes/HotKey
+    from: "0.2.0"
+  SwiftWhisper:
+    url: https://github.com/exPHAT/SwiftWhisper
+    branch: master
+targets:
+  CrispVoice:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/CrispVoice
+    info:
+      path: Sources/CrispVoice/App/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleName: CrispVoice
+        CFBundleShortVersionString: "0.1.0"
+        NSMicrophoneUsageDescription: "CrispVoice records your voice locally to transcribe it on your Mac. Audio never leaves your device."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.crispvoice.app
+        MARKETING_VERSION: "0.1.0"
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: ""
+        SWIFT_VERSION: "5.9"
+    dependencies:
+      - package: HotKey
+      - package: SwiftWhisper
+  CrispVoiceTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/CrispVoiceTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: CrispVoice
+schemes:
+  CrispVoice:
+    build:
+      targets:
+        CrispVoice: all
+        CrispVoiceTests: [test]
+    test:
+      targets:
+        - CrispVoiceTests
