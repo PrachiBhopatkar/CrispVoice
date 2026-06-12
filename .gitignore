@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Xcode / Swift
+build/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+.swiftpm/
+.build/
+Packages/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Secrets & local config — never commit these
+.env
+.env.*
+*.pem
+*.key
+secrets/
+config.local.*
+
+# Whisper model weights (large binaries — distribute/download separately)
+*.bin
+*.gguf
+models/
+
+# Logs & temp
+*.log
+tmp/
