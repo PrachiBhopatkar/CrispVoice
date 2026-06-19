@@ -64,9 +64,13 @@ final class AnthropicClientTests: XCTestCase {
             XCTAssertEqual(json["model"] as? String, "claude-haiku-4-5-20251001")
             XCTAssertEqual(json["max_tokens"] as? Int, 64)
             XCTAssertEqual(json["system"] as? String, "sys")
-            let messages = json["messages"] as? [[String: String]]
+            let messages = json["messages"] as? [[String: Any]]
             XCTAssertNotNil(messages)
-            XCTAssertEqual(messages, [["role": "user", "content": "usr"]])
+            XCTAssertEqual(messages?.count, 1)
+            XCTAssertEqual(messages?.first?["role"] as? String, "user")
+
+            let content = messages?.first?["content"] as? [[String: String]]
+            XCTAssertEqual(content, [["type": "text", "text": "usr"]])
 
             let responseBody = #"{"content":[{"type":"text","text":"{\"variants\":[\"Hi\"]}"}]}"#
             let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
@@ -92,6 +96,27 @@ final class AnthropicClientTests: XCTestCase {
             }
             XCTAssertEqual(statusCode, 401)
             XCTAssertEqual(message, "unauthorized")
+        } catch {
+            XCTFail("expected AnthropicClient.ClientError, got \(error)")
+        }
+    }
+
+    func test_complete_decodesAnthropicErrorBody() async {
+        MockURLProtocol.handler = { request in
+            let body = #"{"error":{"type":"invalid_request_error","message":"messages.0.content: Input should be a valid list"}}"#
+            let resp = HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!
+            return (resp, Data(body.utf8))
+        }
+        let client = AnthropicClient(apiKey: "bad", model: "claude-haiku-4-5-20251001", session: makeSession())
+        do {
+            _ = try await client.complete(system: "s", user: "u", maxTokens: 64)
+            XCTFail("expected throw")
+        } catch let error as AnthropicClient.ClientError {
+            guard case .http(let statusCode, let message) = error else {
+                return XCTFail("expected http error, got \(error)")
+            }
+            XCTAssertEqual(statusCode, 400)
+            XCTAssertEqual(message, "invalid_request_error: messages.0.content: Input should be a valid list")
         } catch {
             XCTFail("expected AnthropicClient.ClientError, got \(error)")
         }

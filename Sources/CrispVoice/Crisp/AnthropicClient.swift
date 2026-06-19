@@ -25,6 +25,15 @@ final class AnthropicClient {
         let content: [Block]
     }
 
+    private struct ErrorResponse: Decodable {
+        struct APIError: Decodable {
+            let type: String
+            let message: String
+        }
+
+        let error: APIError
+    }
+
     func complete(system: String, user: String, maxTokens: Int) async throws -> String {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -36,7 +45,13 @@ final class AnthropicClient {
             "model": model,
             "max_tokens": maxTokens,
             "system": system,
-            "messages": [["role": "user", "content": user]]
+            "messages": [[
+                "role": "user",
+                "content": [[
+                    "type": "text",
+                    "text": user
+                ]]
+            ]]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -45,6 +60,9 @@ final class AnthropicClient {
             throw ClientError.badResponse
         }
         guard http.statusCode == 200 else {
+            if let decoded = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                throw ClientError.http(http.statusCode, "\(decoded.error.type): \(decoded.error.message)")
+            }
             throw ClientError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
         }
 
