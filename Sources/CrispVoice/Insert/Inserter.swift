@@ -15,8 +15,9 @@ final class Inserter {
     func insert(_ text: String) {
         pasteboard.withTemporaryString(text) {
             synthesizeCommandV()
-            // Give the destination app a moment to consume the clipboard before restore.
-            usleep(120_000)
+            // Slack's compose box can consume the clipboard asynchronously after
+            // regaining focus, so keep the temporary value around a bit longer.
+            usleep(500_000)
         }
     }
 

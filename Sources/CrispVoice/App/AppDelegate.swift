@@ -5,15 +5,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeys = HotkeyManager()
     private let inserter = Inserter()
     private let recorder = AudioRecorder()
-    private var pendingTargetApp: NSRunningApplication?
+    private var targetApp: NSRunningApplication?
     private lazy var transcriber = Transcriber(modelURL: Self.devModelURL())
     private lazy var engine = CrispEngine(
         completer: AnthropicClient(
             apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] ?? "",
-            model: "claude-haiku-4-5"
+            model: "claude-haiku-4-5-20251001"
         ),
-        variantCount: 1
+        variantCount: 3
     )
+
+    private let model = SuggestionModel()
+    private var panel: CapturePanel<SuggestionView>!
+    private var lastTranscript = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -22,100 +26,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
-        hotkeys.register { [weak self] in
-            Task { @MainActor in
-                self?.toggle()
-            }
-        }
+        panel = CapturePanel(content: SuggestionView(model: model))
+        model.onPick = { [weak self] text in self?.send(text) }
+        model.onTone = { [weak self] tone in self?.rerun(tone: tone) }
+        model.onRegenerate = { [weak self] in self?.rerun(tone: .neutral) }
+
+        hotkeys.register { [weak self] in self?.toggle() }
     }
 
     private func toggle() {
         if recorder.isRecording {
             statusItem.button?.title = "⏳"
-            pendingTargetApp = NSWorkspace.shared.frontmostApplication
-            if let target = pendingTargetApp {
-                NSLog("CrispVoice: target_capture bundle=%@ pid=%d", target.bundleIdentifier ?? "<unknown>", target.processIdentifier)
-            }
             let frames = recorder.stop()
-            NSLog("CrispVoice: record_stop frames=%d", frames.count)
-            Task { await process(frames) }
-            return
-        }
-
-        do {
-            try recorder.start()
+            model.isWorking = true
+            model.status = "Transcribing…"
+            Task { await self.transcribeThenCrisp(frames) }
+        } else {
+            targetApp = NSWorkspace.shared.frontmostApplication
+            try? recorder.start()
             statusItem.button?.title = "🔴"
-        } catch {
-            statusItem.button?.title = "🎙️"
+            model.variants = []
+            model.status = "Listening…"
+            panel.present()
         }
     }
 
-    private func process(_ frames: [Float]) async {
+    private func transcribeThenCrisp(_ frames: [Float]) async {
         do {
             let transcript = try await transcriber.transcribe(frames)
-            guard !transcript.isEmpty else {
-                NSLog("CrispVoice: transcribe_empty")
-                return
+            lastTranscript = transcript
+            await MainActor.run { self.model.status = "Crisping…" }
+            await runCrisp(tone: .neutral)
+        } catch { await fail(error) }
+        await MainActor.run { self.statusItem.button?.title = "🎙️" }
+    }
+
+    private func rerun(tone: Tone) {
+        guard !lastTranscript.isEmpty else { return }
+        model.isWorking = true
+        Task { await runCrisp(tone: tone) }
+    }
+
+    private func runCrisp(tone: Tone) async {
+        do {
+            let result = try await engine.crisp(transcript: lastTranscript, tone: tone)
+            await MainActor.run {
+                self.model.variants = result.variants
+                self.model.isWorking = false
             }
+        } catch { await fail(error) }
+    }
 
-            NSLog("CrispVoice: transcribe_ok chars=%d", transcript.count)
-
-            let result = try await engine.crisp(transcript: transcript, tone: .neutral)
-            NSLog("CrispVoice: crisp_ok variants=%d", result.variants.count)
-
-            if let best = result.variants.first {
-                let current = NSWorkspace.shared.frontmostApplication
-                NSLog("CrispVoice: preinsert_frontmost bundle=%@ pid=%d", current?.bundleIdentifier ?? "<unknown>", current?.processIdentifier ?? 0)
-
-                if let target = pendingTargetApp,
-                   current?.processIdentifier != target.processIdentifier {
-                    _ = await MainActor.run {
-                        target.activate(options: [.activateIgnoringOtherApps])
-                    }
-                    NSLog("CrispVoice: target_reactivated bundle=%@ pid=%d", target.bundleIdentifier ?? "<unknown>", target.processIdentifier)
-                    try? await Task.sleep(nanoseconds: 600_000_000)
-                    let verified = NSWorkspace.shared.frontmostApplication
-                    NSLog("CrispVoice: postreactivate_frontmost bundle=%@ pid=%d", verified?.bundleIdentifier ?? "<unknown>", verified?.processIdentifier ?? 0)
-                }
-
-                NSLog("CrispVoice: insert_attempt chars=%d", best.count)
-                await MainActor.run {
-                    inserter.insert(best)
-                }
+    private func send(_ text: String) {
+        panel.dismiss()
+        Task { @MainActor in
+            if let targetApp {
+                targetApp.activate(options: [.activateIgnoringOtherApps])
+                try? await Task.sleep(nanoseconds: 600_000_000)
             }
-        } catch {
-            log(error: error)
+            inserter.insert(text)
         }
+    }
 
-        pendingTargetApp = nil
-
+    private func fail(_ error: Error) async {
         await MainActor.run {
-            if !self.recorder.isRecording {
-                self.statusItem.button?.title = "🎙️"
-            }
+            self.model.isWorking = false
+            self.model.status = "Error: \(error.localizedDescription)"
         }
     }
 
     private static func devModelURL() -> URL {
-        if let bundled = Bundle.main.url(forResource: "ggml-base", withExtension: "bin") {
-            return bundled
-        }
-
+        if let bundled = Bundle.main.url(forResource: "ggml-base", withExtension: "bin") { return bundled }
         return URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/Models/ggml-base.bin")
-    }
-
-    private func log(error: Error) {
-        switch error {
-        case let AnthropicClient.ClientError.http(status, message):
-            NSLog("CrispVoice: anthropic_http status=%d message=%@", status, message)
-        case AnthropicClient.ClientError.badResponse:
-            NSLog("CrispVoice: anthropic_bad_response")
-        case CrispResult.ParseError.noJSONObject:
-            NSLog("CrispVoice: parse_no_json")
-        case CrispResult.ParseError.decodeFailed:
-            NSLog("CrispVoice: parse_decode_failed")
-        default:
-            NSLog("CrispVoice: error_type=%@", String(reflecting: type(of: error)))
-        }
     }
 }
