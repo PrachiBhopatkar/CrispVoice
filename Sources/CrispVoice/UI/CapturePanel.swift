@@ -6,7 +6,7 @@ import SwiftUI
 final class CapturePanel<Content: View>: NSPanel {
     init(content: Content) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 320),
             styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
             backing: .buffered,
             defer: false

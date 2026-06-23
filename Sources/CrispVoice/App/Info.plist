@@ -22,5 +22,7 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>CrispVoice records your voice locally to transcribe it on your Mac. Audio never leaves your device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>CrispVoice uses Apple Speech Recognition to show a live transcript while you dictate.</string>
 </dict>
 </plist>

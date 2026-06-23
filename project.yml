@@ -8,9 +8,6 @@ packages:
   HotKey:
     url: https://github.com/soffes/HotKey
     from: "0.2.0"
-  SwiftWhisper:
-    url: https://github.com/exPHAT/SwiftWhisper
-    branch: master
 targets:
   CrispVoice:
     type: application
@@ -24,6 +21,7 @@ targets:
         CFBundleName: CrispVoice
         CFBundleShortVersionString: "0.1.0"
         NSMicrophoneUsageDescription: "CrispVoice records your voice locally to transcribe it on your Mac. Audio never leaves your device."
+        NSSpeechRecognitionUsageDescription: "CrispVoice uses Apple Speech Recognition to show a live transcript while you dictate."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.crispvoice.app
@@ -33,7 +31,6 @@ targets:
         SWIFT_VERSION: "5.9"
     dependencies:
       - package: HotKey
-      - package: SwiftWhisper
   CrispVoiceTests:
     type: bundle.unit-test
     platform: macOS

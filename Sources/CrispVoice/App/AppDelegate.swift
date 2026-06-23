@@ -6,18 +6,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let inserter = Inserter()
     private let recorder = AudioRecorder()
     private var targetApp: NSRunningApplication?
-    private lazy var transcriber = Transcriber(modelURL: Self.devModelURL())
+    private let transcriber = Transcriber()
     private lazy var engine = CrispEngine(
         completer: AnthropicClient(
             apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] ?? "",
             model: "claude-haiku-4-5-20251001"
         ),
-        variantCount: 3
+        variantCount: 1
     )
 
     private let model = SuggestionModel()
     private var panel: CapturePanel<SuggestionView>!
     private var lastTranscript = ""
+    private var isPreparingCapture = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -37,33 +38,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func toggle() {
         if recorder.isRecording {
             statusItem.button?.title = "⏳"
-            let frames = recorder.stop()
+            _ = recorder.stop()
+            recorder.onAudioBufferCaptured = nil
             model.isWorking = true
-            model.status = "Transcribing…"
-            Task { await self.transcribeThenCrisp(frames) }
-        } else {
-            targetApp = NSWorkspace.shared.frontmostApplication
-            try? recorder.start()
-            statusItem.button?.title = "🔴"
             model.variants = []
-            model.status = "Listening…"
-            panel.present()
+            model.status = "Finalizing transcript…"
+            Task {
+                await self.finalizeTranscriptThenCrisp()
+            }
+        } else {
+            startCapture()
         }
     }
 
-    private func transcribeThenCrisp(_ frames: [Float]) async {
+    private func startCapture() {
+        guard !isPreparingCapture else { return }
+
+        isPreparingCapture = true
+        targetApp = NSWorkspace.shared.frontmostApplication
+        lastTranscript = ""
+        model.transcript = ""
+        model.variants = []
+        model.isWorking = false
+        model.status = "Listening…"
+        panel.present()
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await transcriber.startLiveTranscription { [weak self] transcript in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.lastTranscript = transcript
+                        self.model.transcript = transcript
+                    }
+                }
+                recorder.onAudioBufferCaptured = { [weak self] buffer in
+                    self?.transcriber.appendAudioBuffer(buffer)
+                }
+                try recorder.start()
+                await MainActor.run {
+                    self.statusItem.button?.title = "🔴"
+                }
+            } catch {
+                transcriber.cancel()
+                await fail(error)
+                await MainActor.run {
+                    self.panel.dismiss()
+                    self.statusItem.button?.title = "🎙️"
+                }
+            }
+
+            self.isPreparingCapture = false
+        }
+    }
+
+    private func finalizeTranscriptThenCrisp() async {
+        defer {
+            Task { @MainActor in
+                self.statusItem.button?.title = "🎙️"
+            }
+        }
         do {
-            let transcript = try await transcriber.transcribe(frames)
+            let transcript = try await transcriber.finishTranscription()
             lastTranscript = transcript
-            await MainActor.run { self.model.status = "Crisping…" }
+            await MainActor.run {
+                self.model.transcript = transcript
+                self.model.variants = []
+                self.model.status = "Crisping…"
+            }
             await runCrisp(tone: .neutral)
         } catch { await fail(error) }
-        await MainActor.run { self.statusItem.button?.title = "🎙️" }
     }
 
     private func rerun(tone: Tone) {
         guard !lastTranscript.isEmpty else { return }
         model.isWorking = true
+        model.status = "Crisping…"
         Task { await runCrisp(tone: tone) }
     }
 
@@ -72,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let result = try await engine.crisp(transcript: lastTranscript, tone: tone)
             await MainActor.run {
                 self.model.variants = result.variants
+                self.model.status = ""
                 self.model.isWorking = false
             }
         } catch { await fail(error) }
@@ -93,10 +145,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.model.isWorking = false
             self.model.status = "Error: \(error.localizedDescription)"
         }
-    }
-
-    private static func devModelURL() -> URL {
-        if let bundled = Bundle.main.url(forResource: "ggml-base", withExtension: "bin") { return bundled }
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/Models/ggml-base.bin")
     }
 }
