@@ -2,14 +2,25 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a native macOS menu-bar app that, on a global hotkey, records the mic, transcribes it on-device with whisper.cpp, rewrites it into a crisp message via the user's own Claude, and pastes the result into the focused Slack compose box — with no Slack app, no backend, and no content ever leaving the machine except the user's own Claude call.
+**Goal:** Build a native macOS menu-bar app that, on a global hotkey, records the mic, produces an on-device live transcript, rewrites it into a crisp message via the user's own Claude, and pastes the result into the focused Slack compose box — with no Slack app, no backend, and no content ever leaving the machine except the user's own Claude call.
 
-**Architecture:** A non-sandboxed AppKit/SwiftUI accessory app (`LSUIElement`). A global hotkey starts/stops a mic recording (`AVAudioEngine`). Audio is converted to 16 kHz mono `[Float]` and transcribed locally by `whisper.cpp` (via the SwiftWhisper package). The transcript is sent to the Anthropic Messages API with the user's own key; the JSON response is parsed into crisp variants shown in a non-activating floating panel. Selecting a variant writes it to the clipboard and synthesizes ⌘V into the still-frontmost Slack window. Pure logic (prompt building, response parsing, audio conversion, clipboard, keychain, preferences) is unit-tested with XCTest; system/UI integration is verified with explicit manual steps.
+**Architecture:** A non-sandboxed AppKit/SwiftUI accessory app (`LSUIElement`). A global hotkey starts/stops mic capture (`AVAudioEngine`). Apple Speech provides the live on-device transcript shown in the floating panel while the user is speaking. When recording stops, the final transcript is sent to the Anthropic Messages API with the user's own key; the JSON response is parsed into crisp variants shown in a non-activating floating panel. Selecting a variant writes it to the clipboard and synthesizes ⌘V into the still-frontmost Slack window. Pure logic (prompt building, response parsing, audio conversion, clipboard, keychain, preferences) is unit-tested with XCTest; system/UI integration is verified with explicit manual steps.
+
+## Architecture update — 2026-06-23
+
+This plan was originally written around `whisper.cpp` / SwiftWhisper. After implementation and live testing, that transcription path did not meet the latency target for the product. The active architecture is now:
+
+- **Live transcript:** Apple Speech (`Speech.framework`)
+- **Privacy rule:** require **on-device** Apple Speech support or fail explicitly; do not silently fall back to a network-backed speech path
+- **Rewrite:** Anthropic Claude, using the user's own API key
+- **Slack delivery:** unchanged paste-into-focused-compose-box flow
+
+The already-completed Whisper-specific tasks remain as historical record, but any future work should follow the Apple Speech direction above. A later cleanup pass should remove remaining Whisper-era docs/scripts/code paths that are now obsolete.
 
 **Tech Stack:**
 - **Language/UI:** Swift 5.9+, AppKit + SwiftUI, macOS 13+ deployment target.
 - **Project generation:** XcodeGen (`project.yml` → `.xcodeproj`), built/tested with `xcodebuild`. Keeps everything text-based and agent-editable.
-- **Transcription:** [SwiftWhisper](https://github.com/exPHAT/SwiftWhisper) (wraps whisper.cpp). Model: ggml `base` for dev, upgradeable to `small`/`medium`/`large-v3`.
+- **Transcription:** Apple `Speech.framework` with partial results for live transcript, requiring on-device support.
 - **Global hotkey:** [HotKey](https://github.com/soffes/HotKey).
 - **LLM:** Anthropic Messages API via `URLSession` (no SDK). Default model `claude-haiku-4-5-20251001` (fast/cheap for short rewrites), configurable.
 - **Audio:** AVFoundation (`AVAudioEngine`, `AVAudioConverter`).
@@ -21,7 +32,7 @@
 
 **Non-sandbox note:** The app is **not** App-Sandboxed (required for Accessibility keystroke synthesis + direct distribution). Do not enable the App Sandbox capability.
 
-**Permissions used:** Microphone (`NSMicrophoneUsageDescription`, runtime TCC prompt) and Accessibility (runtime TCC grant in System Settings → Privacy & Security → Accessibility; required to post ⌘V to other apps).
+**Permissions used:** Microphone (`NSMicrophoneUsageDescription`), Speech Recognition (`NSSpeechRecognitionUsageDescription`), and Accessibility (runtime TCC grant in System Settings → Privacy & Security → Accessibility; required to post ⌘V to other apps).
 
 ---
 
@@ -31,8 +42,6 @@
 CrispVoice/
 ├── project.yml                              # XcodeGen project definition
 ├── scripts/
-│   └── download-model.sh                     # fetches a ggml whisper model
-├── Models/                                    # (gitignored) downloaded *.bin live here
 ├── Sources/CrispVoice/
 │   ├── App/
 │   │   ├── main.swift                         # @main entry, NSApplication bootstrap
@@ -45,7 +54,7 @@ CrispVoice/
 │   ├── Capture/
 │   │   ├── AudioConverter.swift               # → 16 kHz mono [Float]      [unit-tested]
 │   │   └── AudioRecorder.swift                # AVAudioEngine mic capture
-│   ├── Transcription/Transcriber.swift        # SwiftWhisper wrapper
+│   ├── Transcription/Transcriber.swift        # Apple Speech live transcription wrapper
 │   ├── Crisp/
 │   │   ├── CrispPrompt.swift                  # builds system+user prompt  [unit-tested]
 │   │   ├── CrispResult.swift                  # variants model + parsing   [unit-tested]
@@ -56,7 +65,7 @@ CrispVoice/
 │   │   └── SuggestionView.swift              # SwiftUI variants + tone buttons
 │   ├── Settings/
 │   │   ├── KeychainStore.swift               # API key in Keychain        [unit-tested]
-│   │   ├── Preferences.swift                 # hotkey/model/tone prefs     [unit-tested]
+│   │   ├── Preferences.swift                 # hotkey/tone prefs           [unit-tested]
 │   │   └── SettingsView.swift                # SwiftUI settings window
 │   └── Onboarding/PermissionsManager.swift   # check/request Accessibility + Mic
 └── Tests/CrispVoiceTests/
@@ -71,7 +80,7 @@ CrispVoice/
     └── Support/MockURLProtocol.swift
 ```
 
-**Phase gates:** Phase 0 ends when a hotkey reliably pastes fixed text into Slack. Phase 1 ends when the full dictate→transcribe→crisp→paste loop works with a hardcoded key. Phase 2 ends when variants/tone/edit work in the floating panel. Phase 3 ends when the key lives in Keychain, permissions are guided, and the model is selectable — the shippable personal MVP.
+**Phase gates:** Phase 0 ends when a hotkey reliably pastes fixed text into Slack. Phase 1 ends when the full dictate→transcribe→crisp→paste loop works with a hardcoded key. Phase 2 ends when variants/tone/live transcript work in the floating panel and Slack stays frontmost. Phase 3 ends when the key lives in Keychain, permissions are guided, and the app runs on supported machines with on-device Apple Speech — the shippable personal MVP.
 
 ---
 
