@@ -1,19 +1,27 @@
 import AppKit
+import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private enum AppDelegateError: LocalizedError {
+        case missingAPIKey
+
+        var errorDescription: String? {
+            switch self {
+            case .missingAPIKey:
+                return "Set your Anthropic API key in Settings to continue."
+            }
+        }
+    }
+
     private var statusItem: NSStatusItem!
+    private var settingsWindow: NSWindow?
     private let hotkeys = HotkeyManager()
     private let inserter = Inserter()
     private let recorder = AudioRecorder()
     private var targetApp: NSRunningApplication?
     private let transcriber = Transcriber()
-    private lazy var engine = CrispEngine(
-        completer: AnthropicClient(
-            apiKey: ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] ?? "",
-            model: "claude-haiku-4-5-20251001"
-        ),
-        variantCount: 1
-    )
+    private let keychain = KeychainStore()
+    private let prefs = Preferences()
 
     private let model = SuggestionModel()
     private var panel: CapturePanel<SuggestionView>!
@@ -24,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🎙️"
         let menu = NSMenu()
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
@@ -120,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func runCrisp(tone: Tone) async {
         do {
+            let engine = try makeEngine()
             let result = try await engine.crisp(transcript: lastTranscript, tone: tone)
             await MainActor.run {
                 self.model.variants = result.variants
@@ -145,5 +158,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.model.isWorking = false
             self.model.status = "Error: \(error.localizedDescription)"
         }
+    }
+
+    private func makeEngine() throws -> CrispEngine {
+        guard let apiKey = currentAPIKey() else {
+            throw AppDelegateError.missingAPIKey
+        }
+
+        return CrispEngine(
+            completer: AnthropicClient(apiKey: apiKey, model: prefs.modelName),
+            variantCount: prefs.variantCount
+        )
+    }
+
+    private func currentAPIKey() -> String? {
+        let storedKey = keychain.get()?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let storedKey, !storedKey.isEmpty {
+            return storedKey
+        }
+
+        let envKey = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let envKey, !envKey.isEmpty {
+            return envKey
+        }
+
+        return nil
+    }
+
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            let hosting = NSHostingController(rootView: SettingsView())
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "CrispVoice Settings"
+            window.styleMask = NSWindow.StyleMask([.titled, .closable])
+            window.isReleasedWhenClosed = false
+            settingsWindow = window
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 }
