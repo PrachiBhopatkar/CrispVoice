@@ -95,6 +95,10 @@ enum TranscriberError: LocalizedError {
 }
 
 /// Streams live transcription from Apple Speech and returns the final transcript on stop.
+///
+/// Apple partials within a recognition window are cumulative replacements, not additive
+/// chunks. `currentPartial` always holds Apple's latest view of the current window.
+/// `finalizedText` accumulates text from windows closed by an `isFinal=true` result.
 final class Transcriber {
     typealias AuthorizationProvider = @Sendable () async -> SpeechAuthorizationState
     typealias SessionFactory = @Sendable (
@@ -108,9 +112,15 @@ final class Transcriber {
     private var session: SpeechRecognitionSession?
     private var partialHandler: (@Sendable (String) -> Void)?
     private var latestTranscript = ""
+    private var finalizedText = ""
+    private var currentPartial = ""
     private var finalContinuation: CheckedContinuation<String, Error>?
     private var terminalResult: Result<String, Error>?
     private var isFinished = false
+    private var finishRequested = false
+    // Incremented on every cancel/restart so stale callbacks from a previous session
+    // that fire after the new session has started are silently ignored.
+    private var sessionGeneration = 0
 
     init(locale: Locale = Locale(identifier: "en-US")) {
         self.authorizationProvider = {
@@ -155,17 +165,23 @@ final class Transcriber {
 
         cancel()
 
+        // Read the generation AFTER cancel() has incremented it so the new session's
+        // callbacks carry the updated value and stale old-session callbacks are dropped.
+        let capturedGeneration = withLockedState { sessionGeneration }
         let session = try sessionFactory { [weak self] result in
-            self?.handle(result)
+            self?.handle(result, ifGeneration: capturedGeneration)
         }
 
         withLockedState {
             self.session = session
             partialHandler = onPartialResult
             latestTranscript = ""
+            finalizedText = ""
+            currentPartial = ""
             finalContinuation = nil
             terminalResult = nil
             isFinished = false
+            finishRequested = false
         }
     }
 
@@ -175,32 +191,33 @@ final class Transcriber {
     }
 
     func finishTranscription() async throws -> String {
-        let state = withLockedState { (terminalResult, session) }
-        let immediateResult = state.0
-
-        if immediateResult == nil {
-            state.1?.finishAudio()
-        }
-
-        if let immediateResult {
-            return try immediateResult.get()
-        }
-
         return try await withCheckedThrowingContinuation { continuation in
-            let terminalResult = withLockedState { () -> Result<String, Error>? in
-                if let existingResult = self.terminalResult {
-                    return existingResult
+            let (immediateResult, sessionToFinish) = withLockedState {
+                () -> (Result<String, Error>?, SpeechRecognitionSession?) in
+                finishRequested = true
+
+                if let existingResult = terminalResult {
+                    return (existingResult, nil)
                 }
-                if let latest = self.normalizedTranscript(self.latestTranscript), self.isFinished {
-                    return .success(latest)
+
+                // If the current window already closed (no pending partial) and we have
+                // finalized content, return immediately without waiting for another event.
+                if currentPartial.isEmpty && !finalizedText.isEmpty {
+                    return (.success(finalizedText), nil)
                 }
 
                 finalContinuation = continuation
-                return nil
+                return (nil, session)
             }
 
-            if let terminalResult {
-                continuation.resume(with: terminalResult)
+            DebugLog.write(
+                "Transcriber.finishTranscription immediate=\(immediateResult != nil) hasSession=\(sessionToFinish != nil)"
+            )
+
+            if let immediateResult {
+                continuation.resume(with: immediateResult)
+            } else {
+                sessionToFinish?.finishAudio()
             }
         }
     }
@@ -208,12 +225,16 @@ final class Transcriber {
     func cancel() {
         let state = withLockedState {
             let state = (session, finalContinuation)
+            sessionGeneration += 1
             session = nil
             partialHandler = nil
             finalContinuation = nil
             terminalResult = nil
+            finalizedText = ""
+            currentPartial = ""
             latestTranscript = ""
             isFinished = false
+            finishRequested = false
             return state
         }
 
@@ -221,7 +242,8 @@ final class Transcriber {
         state.1?.resume(throwing: CancellationError())
     }
 
-    private func handle(_ result: Result<SpeechTranscriptionUpdate, Error>) {
+    private func handle(_ result: Result<SpeechTranscriptionUpdate, Error>, ifGeneration generation: Int) {
+        guard withLockedState({ sessionGeneration == generation }) else { return }
         switch result {
         case .success(let update):
             handleSuccess(update)
@@ -231,27 +253,85 @@ final class Transcriber {
     }
 
     private func handleSuccess(_ update: SpeechTranscriptionUpdate) {
-        let text = normalizedTranscript(update.text) ?? currentTranscriptFallback()
-        let partialHandler = withLockedState { () -> ((String) -> Void)? in
-            if isFinished {
-                return nil
+        let normalized = normalizedTranscript(update.text) ?? ""
+
+        var handlerToCall: ((String) -> Void)?
+        var publishedTranscript = ""
+        var shouldComplete = false
+
+        withLockedState {
+            guard !isFinished else { return }
+
+            let previous = latestTranscript
+
+            if update.isFinal {
+                // Apple finished this recognition window. Prefer Apple's final text when
+                // non-empty; fall back to whatever partial we accumulated for this window.
+                let windowText = normalized.isEmpty ? currentPartial : normalized
+                if !windowText.isEmpty {
+                    finalizedText = [finalizedText, windowText]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: " ")
+                }
+                currentPartial = ""
+            } else if !normalized.isEmpty {
+                let currentWords = currentPartial.split(whereSeparator: \.isWhitespace).map(String.init)
+                let incomingWords = normalized.split(whereSeparator: \.isWhitespace).map(String.init)
+                // Detect when Apple silently started a new recognition window after a pause
+                // without sending isFinal=true for the previous window. Two reliable signals:
+                //   Signal 1 — first word changed: Apple never changes the first word within
+                //     a single window's refinements.
+                //   Signal 2 — dramatic shortening: same-window corrections never drop below
+                //     40% of the current word count. A post-pause restart does, because Apple
+                //     only has a word or two of the new utterance transcribed so far.
+                let firstWordChanged = !currentWords.isEmpty && !incomingWords.isEmpty &&
+                    canonicalToken(incomingWords[0]) != canonicalToken(currentWords[0])
+                let wordRatio = currentWords.isEmpty ? 1.0
+                    : Double(incomingWords.count) / Double(currentWords.count)
+                let isDramaticShortening = !currentWords.isEmpty
+                    && incomingWords.count < currentWords.count
+                    && wordRatio < 0.4
+                if firstWordChanged || isDramaticShortening {
+                    // Commit the completed window before starting the new one.
+                    finalizedText = [finalizedText, currentPartial]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: " ")
+                    currentPartial = normalized
+                } else {
+                    currentPartial = deduplicatedPartial(normalized, relativeTo: currentPartial)
+                }
             }
 
-            latestTranscript = text
-            return self.partialHandler
+            latestTranscript = [finalizedText, currentPartial]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+
+            if latestTranscript != previous {
+                handlerToCall = self.partialHandler
+            }
+            publishedTranscript = latestTranscript
+            shouldComplete = update.isFinal && finishRequested
         }
 
-        if !text.isEmpty {
-            partialHandler?(text)
+        DebugLog.write(
+            "Transcriber.handleSuccess incomingLength=\(update.text.count) incomingFP=\(DebugLog.fingerprint(update.text)) mergedLength=\(publishedTranscript.count) mergedFP=\(DebugLog.fingerprint(publishedTranscript)) isFinal=\(update.isFinal)"
+        )
+
+        if !publishedTranscript.isEmpty {
+            handlerToCall?(publishedTranscript)
         }
 
-        if update.isFinal {
-            if text.isEmpty {
+        if shouldComplete {
+            if publishedTranscript.isEmpty {
                 complete(with: .failure(TranscriberError.noTranscript))
             } else {
-                complete(with: .success(text))
+                complete(with: .success(publishedTranscript))
             }
         }
+    }
+
+    private func shouldCompleteOnFinalUpdate() -> Bool {
+        withLockedState { finishRequested }
     }
 
     private func complete(with result: Result<String, Error>) {
@@ -271,13 +351,87 @@ final class Transcriber {
         continuation?.resume(with: result)
     }
 
-    private func currentTranscriptFallback() -> String {
-        withLockedState { latestTranscript }
+    // MARK: - Partial deduplication
+
+    /// Strips a repeated `currentPartial` prefix that Apple echoed before new words.
+    ///
+    /// Apple sometimes sends: "[current words] [current words] [new words]".
+    /// This returns "[current words] [new words]" instead of appending everything.
+    /// When incoming is shorter than or equal to currentPartial (a revision or same
+    /// content), it is returned unchanged — replacing the current partial is correct.
+    private func deduplicatedPartial(_ incoming: String, relativeTo currentPartial: String) -> String {
+        guard !currentPartial.isEmpty else { return incoming }
+
+        let currentWords = currentPartial.split(whereSeparator: \.isWhitespace).map(String.init)
+        let incomingWords = incoming.split(whereSeparator: \.isWhitespace).map(String.init)
+
+        guard incomingWords.count > currentWords.count,
+              wordsMatch(Array(incomingWords.prefix(currentWords.count)), currentWords)
+        else {
+            // Incoming is shorter/same, or doesn't start with current — just replace.
+            return incoming
+        }
+
+        // Apple echoed back our current content. Merge the remainder.
+        let remainder = Array(incomingWords.dropFirst(currentWords.count))
+        let overlap = longestSuffixPrefixOverlap(existingWords: currentWords, incomingWords: remainder)
+        if overlap == remainder.count {
+            return currentPartial
+        }
+        return (currentWords + remainder.dropFirst(overlap)).joined(separator: " ")
     }
+
+    private func longestSuffixPrefixOverlap(existingWords: [String], incomingWords: [String]) -> Int {
+        let limit = min(existingWords.count, incomingWords.count)
+        guard limit > 0 else { return 0 }
+        for count in stride(from: limit, through: 1, by: -1) {
+            if wordsMatch(Array(existingWords.suffix(count)), Array(incomingWords.prefix(count))) {
+                return count
+            }
+        }
+        return 0
+    }
+
+    private func wordsMatch(_ lhs: [String], _ rhs: [String]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        return zip(lhs, rhs).allSatisfy { canonicalToken($0) == canonicalToken($1) }
+    }
+
+    private func canonicalToken(_ token: String) -> String {
+        token.trimmingCharacters(in: .punctuationCharacters).lowercased()
+    }
+
+    // MARK: - Normalization
 
     private func normalizedTranscript(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        guard !trimmed.isEmpty else { return nil }
+        return collapseRepeatedPhrase(in: trimmed)
+    }
+
+    private func collapseRepeatedPhrase(in text: String) -> String {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+
+        guard words.count >= 6 else { return text }
+
+        for phraseLength in 3...(words.count / 2) {
+            guard words.count.isMultiple(of: phraseLength) else { continue }
+
+            let phrase = Array(words.prefix(phraseLength))
+            let chunkCount = words.count / phraseLength
+
+            guard chunkCount >= 2 else { continue }
+
+            let isRepeated = stride(from: 0, to: words.count, by: phraseLength).allSatisfy { index in
+                Array(words[index..<(index + phraseLength)]) == phrase
+            }
+
+            if isRepeated {
+                return phrase.joined(separator: " ")
+            }
+        }
+
+        return text
     }
 
     private func withLockedState<T>(_ body: () -> T) -> T {

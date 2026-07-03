@@ -1,4 +1,9 @@
 import SwiftUI
+import AppKit
+
+extension Notification.Name {
+    static let crispVoiceAPIKeyDidChange = Notification.Name("CrispVoiceAPIKeyDidChange")
+}
 
 @MainActor
 final class SettingsModel: ObservableObject {
@@ -41,6 +46,11 @@ final class SettingsModel: ObservableObject {
             prefs.modelName = modelName
             prefs.variantCount = variantCount
             validationMessage = ""
+            NotificationCenter.default.post(
+                name: .crispVoiceAPIKeyDidChange,
+                object: nil,
+                userInfo: ["apiKey": normalizedKey]
+            )
         } catch {
             validationMessage = "❌ Unable to save your API key."
         }
@@ -49,6 +59,12 @@ final class SettingsModel: ObservableObject {
     func savePreferences() {
         prefs.modelName = modelName
         prefs.variantCount = variantCount
+    }
+
+    func pasteAPIKey() {
+        if let value = NSPasteboard.general.string(forType: .string) {
+            apiKey = value
+        }
     }
 
     func validate() async {
@@ -91,6 +107,10 @@ struct SettingsView: View {
                 SecureField("sk-ant-…", text: $model.apiKey)
 
                 HStack(spacing: 12) {
+                    Button("Paste") {
+                        model.pasteAPIKey()
+                    }
+
                     Button("Save") {
                         model.save()
                     }
@@ -132,7 +152,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding(20)
-        .frame(width: 420)
+        .frame(minWidth: 420, maxWidth: 420, minHeight: 260)
         .onChange(of: model.modelName) { _ in
             model.savePreferences()
         }
