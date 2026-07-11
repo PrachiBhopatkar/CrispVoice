@@ -88,6 +88,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await self.finalizeTranscriptThenCrisp()
             }
         } else {
+            guard PermissionsManager.hasAccessibility() else {
+                PermissionsManager.openAccessibilitySettings()
+                return
+            }
             startCapture()
         }
     }
