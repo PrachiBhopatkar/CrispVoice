@@ -1,18 +1,20 @@
 import Foundation
 
 enum Tone: String, CaseIterable {
-    case neutral, shorter, direct, warmer
+    case neutral, direct, warmer, formal
 
     var instruction: String {
         switch self {
         case .neutral:
             return "Keep a natural, professional tone."
-        case .shorter:
-            return "Make it as short as possible while keeping the meaning."
         case .direct:
             return "Make it direct and to the point."
         case .warmer:
             return "Make it warmer and friendlier."
+        case .formal:
+            return "Rewrite as a formal, professional message. Use complete sentences, " +
+                   "no contractions, and precise word choice. Add a brief, neutral greeting " +
+                   "and sign-off even if none was dictated."
         }
     }
 }
@@ -28,7 +30,8 @@ enum CrispPrompt {
         infer the intended meaning from context, repair obvious transcription errors and non-words, \
         and fix them.
         Rewrite it to be concise, well-punctuated, and ready to send in Slack. Do not add greetings \
-        or sign-offs that weren't intended. Preserve the user's intent and any concrete details \
+        or sign-offs that weren't intended, unless the tone instruction below explicitly calls for one. \
+        Preserve the user's intent and any concrete details \
         (names, dates, links). Preserve facts. Do not invent details, claims, commitments, or context \
         that are not supported by the transcript.
         Return ONLY valid JSON of the form: {"variants": ["...", "..."]} with exactly \(variantCount) \

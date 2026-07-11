@@ -17,4 +17,22 @@ final class CrispPromptTests: XCTestCase {
         XCTAssertTrue(u.contains("hey can u snd me teh deck"))
         XCTAssertTrue(u.lowercased().contains("direct"))
     }
+
+    func test_formalTone_instructsFormalLanguageAndGreeting() {
+        let instruction = Tone.formal.instruction.lowercased()
+        XCTAssertTrue(instruction.contains("formal"))
+        XCTAssertTrue(instruction.contains("complete sentences"))
+        XCTAssertTrue(instruction.contains("greeting"))
+    }
+
+    func test_user_embedsFormalToneInstruction() {
+        let u = CrispPrompt.user(transcript: "can u send the report by friday", tone: .formal)
+        XCTAssertTrue(u.contains("can u send the report by friday"))
+        XCTAssertTrue(u.lowercased().contains("formal"))
+    }
+
+    func test_system_allowsGreetingExceptionForToneInstruction() {
+        let s = CrispPrompt.system(variantCount: 3).lowercased()
+        XCTAssertTrue(s.contains("unless the tone instruction below explicitly calls for one"))
+    }
 }

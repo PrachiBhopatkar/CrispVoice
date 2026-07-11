@@ -70,9 +70,9 @@ struct SuggestionView: View {
 
             if model.showsVariantButtons {
                 HStack(spacing: 6) {
-                    toneButton("Shorter", .shorter)
                     toneButton("Direct", .direct)
                     toneButton("Warmer", .warmer)
+                    toneButton("Formal", .formal)
                     Button("Regenerate") { model.onRegenerate() }
                 }
                 .font(.caption)
