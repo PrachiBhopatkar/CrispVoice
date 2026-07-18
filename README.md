@@ -39,6 +39,12 @@ It does not need to retrieve or recreate the surrounding conversation. You read 
 
 CrispVoice shortens the distance between understanding a message and responding to it.
 
+## Why "CrispVoice"?
+
+Because the goal is not to capture every hesitation exactly as it was spoken.
+
+The goal is to turn your intent into communication that is **clear, concise, and ready to send**.
+
 ## More Than Speech-to-Text
 
 CrispVoice is a **voice-to-structured-message conversion system**.
@@ -231,9 +237,3 @@ xcodebuild \
 - The user should always review and send the final message.
 
 For more detail, see the [design specification](docs/superpowers/specs/2026-06-12-crispvoice-design.md).
-
-## Why "CrispVoice"?
-
-Because the goal is not to capture every hesitation exactly as it was spoken.
-
-The goal is to turn your intent into communication that is **clear, concise, and ready to send**.
