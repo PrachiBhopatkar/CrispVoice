@@ -232,15 +232,6 @@ xcodebuild \
 
 For more detail, see the [design specification](docs/superpowers/specs/2026-06-12-crispvoice-design.md).
 
-## Roadmap
-
-- Configurable global hotkeys
-- More writing formats and message structures
-- Additional rewrite providers
-- Improved testing across macOS applications
-- A signed and notarized public release
-- A fully local rewrite option
-
 ## Why "CrispVoice"?
 
 Because the goal is not to capture every hesitation exactly as it was spoken.
