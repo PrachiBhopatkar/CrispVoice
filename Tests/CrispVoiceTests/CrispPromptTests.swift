@@ -21,8 +21,11 @@ final class CrispPromptTests: XCTestCase {
     func test_formalTone_instructsFormalLanguageAndGreeting() {
         let instruction = Tone.formal.instruction.lowercased()
         XCTAssertTrue(instruction.contains("formal"))
-        XCTAssertTrue(instruction.contains("complete sentences"))
-        XCTAssertTrue(instruction.contains("greeting"))
+        XCTAssertTrue(instruction.contains("hello,"))
+        XCTAssertTrue(instruction.contains("thank you,"))
+        XCTAssertTrue(instruction.contains("exact structure"))
+        XCTAssertTrue(instruction.contains("decisive"))
+        XCTAssertTrue(instruction.contains("do not use filler"))
     }
 
     func test_user_embedsFormalToneInstruction() {

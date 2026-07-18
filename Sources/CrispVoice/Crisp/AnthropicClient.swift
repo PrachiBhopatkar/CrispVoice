@@ -3,7 +3,22 @@ import Foundation
 /// Minimal Anthropic Messages API client. Called directly from the user's
 /// machine with the user's own key - no backend in the path.
 final class AnthropicClient {
-    enum ClientError: Error { case http(Int, String), badResponse }
+    enum ClientError: LocalizedError {
+        case http(Int, String)
+        case badResponse
+
+        var errorDescription: String? {
+            switch self {
+            case .http(let statusCode, let message):
+                if message.isEmpty {
+                    return "Anthropic request failed (HTTP \(statusCode))."
+                }
+                return "Anthropic request failed (HTTP \(statusCode)): \(message)"
+            case .badResponse:
+                return "Anthropic returned an unexpected response."
+            }
+        }
+    }
 
     private let apiKey: String
     private let model: String

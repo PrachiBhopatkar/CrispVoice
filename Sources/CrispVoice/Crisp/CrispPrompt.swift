@@ -12,9 +12,11 @@ enum Tone: String, CaseIterable {
         case .warmer:
             return "Make it warmer and friendlier."
         case .formal:
-            return "Rewrite as a formal, professional message. Use complete sentences, " +
-                   "no contractions, and precise word choice. Add a brief, neutral greeting " +
-                   "and sign-off even if none was dictated."
+            return "Rewrite as a formal, professional message in exact structure: " +
+                   "\"Hello,\" then a blank line, then the message body, then a blank line, " +
+                   "then \"Thank you,\". Use complete sentences, no contractions, precise " +
+                   "word choice, and decisive, to-the-point language. Do not use filler, " +
+                   "hedging, or soft phrasing such as \"hope this helps\" or \"hope it works\"."
         }
     }
 }

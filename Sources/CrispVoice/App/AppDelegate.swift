@@ -230,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func fail(_ error: Error) async {
+        DebugLog.write("AppDelegate.fail error=\(error.localizedDescription)")
         await MainActor.run {
             self.model.isWorking = false
             self.model.status = "Error: \(error.localizedDescription)"

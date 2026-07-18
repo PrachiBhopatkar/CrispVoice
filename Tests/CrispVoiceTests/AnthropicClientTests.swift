@@ -121,4 +121,10 @@ final class AnthropicClientTests: XCTestCase {
             XCTFail("expected AnthropicClient.ClientError, got \(error)")
         }
     }
+
+    func test_clientError_localizedDescriptionIncludesHTTPStatusAndMessage() {
+        let error = AnthropicClient.ClientError.http(401, "invalid_api_key: bad key")
+
+        XCTAssertEqual(error.localizedDescription, "Anthropic request failed (HTTP 401): invalid_api_key: bad key")
+    }
 }
