@@ -34,3 +34,4 @@ Models/
 *.log
 tmp/
 DevBuild/
+.worktrees/
