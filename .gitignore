@@ -21,6 +21,7 @@ CrispVoice.xcodeproj/
 .env.*
 *.pem
 *.key
+*.p12
 secrets/
 config.local.*
 
@@ -34,4 +35,5 @@ Models/
 *.log
 tmp/
 DevBuild/
+dist/
 .worktrees/

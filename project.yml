@@ -19,13 +19,15 @@ targets:
       properties:
         LSUIElement: true
         CFBundleName: CrispVoice
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSMicrophoneUsageDescription: "CrispVoice records your voice locally to transcribe it on your Mac. Audio never leaves your device."
         NSSpeechRecognitionUsageDescription: "CrispVoice uses Apple Speech Recognition to show a live transcript while you dictate."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.crispvoice.app
         MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_ENTITLEMENTS: ""
         SWIFT_VERSION: "5.9"
