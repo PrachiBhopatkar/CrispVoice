@@ -215,6 +215,8 @@ The included helper builds and launches a stable development copy:
 ./scripts/run-dev.sh
 ```
 
+This is the supported development launch path. It signs and opens DevBuild/CrispVoice.app so macOS can preserve Accessibility permission across rebuilds; direct Xcode Run is not covered by this workflow.
+
 ### Test
 
 ```bash

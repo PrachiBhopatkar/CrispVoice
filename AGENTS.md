@@ -88,10 +88,11 @@ xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -configuration Debug
 # Test
 xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' test
 
-# Run the built app (menu-bar; needs Accessibility + Microphone granted)
-APP=$(find ~/Library/Developer/Xcode/DerivedData -name CrispVoice.app -path '*Debug*' | head -1)
-open "$APP"
+# Build, sign, verify, and launch the stable development copy.
+./scripts/run-dev.sh
 ```
+
+Do not launch CrispVoice directly from Xcode DerivedData; that build is ad-hoc signed and invalidates Accessibility permission after rebuilds.
 
 For end-to-end tasks before Phase 3, supply the key via env: launch with `ANTHROPIC_API_KEY` set (see plan Task 1.8).
 
