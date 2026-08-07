@@ -12,6 +12,26 @@ final class CrispPromptTests: XCTestCase {
         XCTAssertTrue(s.contains("3"))
     }
 
+    func test_system_requiresStringVariantsAndEscapedFormatting() {
+        let system = CrispPrompt.system(variantCount: 3)
+
+        XCTAssertTrue(system.contains("array of JSON strings"))
+        XCTAssertTrue(system.contains(#"\n"#))
+        XCTAssertTrue(system.contains(#"\""#))
+        XCTAssertTrue(system.contains("not literal line breaks"))
+    }
+
+    func test_repairSystem_preservesBaseContractAndRequestsOneStrictRetry() {
+        let base = CrispPrompt.system(variantCount: 3)
+        let repair = CrispPrompt.repairSystem(variantCount: 3)
+
+        XCTAssertTrue(repair.hasPrefix(base))
+        XCTAssertTrue(repair.contains("previous response could not be parsed"))
+        XCTAssertTrue(repair.contains("Try exactly once more"))
+        XCTAssertTrue(repair.contains(#"\n"#))
+        XCTAssertTrue(repair.contains(#"\""#))
+    }
+
     func test_user_embedsRawTranscriptAndTone() {
         let u = CrispPrompt.user(transcript: "hey can u snd me teh deck", tone: .direct)
         XCTAssertTrue(u.contains("hey can u snd me teh deck"))

@@ -11,6 +11,14 @@ extension AnthropicClient: TextCompleter {
 }
 
 final class CrispEngine {
+    enum OutputError: LocalizedError, Equatable {
+        case invalidStructuredResponse
+
+        var errorDescription: String? {
+            "Anthropic returned invalid message variants twice. Please try again."
+        }
+    }
+
     private let completer: TextCompleter
     private let variantCount: Int
 
@@ -20,9 +28,24 @@ final class CrispEngine {
     }
 
     func crisp(transcript: String, tone: Tone) async throws -> CrispResult {
-        let system = CrispPrompt.system(variantCount: variantCount)
         let user = CrispPrompt.user(transcript: transcript, tone: tone)
-        let raw = try await completer.complete(system: system, user: user)
-        return try CrispResult.parse(raw)
+        let raw = try await completer.complete(
+            system: CrispPrompt.system(variantCount: variantCount),
+            user: user
+        )
+
+        do {
+            return try CrispResult.parse(raw)
+        } catch is CrispResult.ParseError {
+            let retriedRaw = try await completer.complete(
+                system: CrispPrompt.repairSystem(variantCount: variantCount),
+                user: user
+            )
+            do {
+                return try CrispResult.parse(retriedRaw)
+            } catch is CrispResult.ParseError {
+                throw OutputError.invalidStructuredResponse
+            }
+        }
     }
 }
