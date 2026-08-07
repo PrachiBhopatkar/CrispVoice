@@ -323,7 +323,17 @@ Stage A checks every requirement in `docs/superpowers/specs/2026-08-06-formal-js
 
 Stage B checks concurrency/state safety, exact retry count, error typing, prompt escaping, test fidelity, no transcript/response/key logging, no backend/telemetry/sandbox changes, and focused scope. Address findings and repeat Steps 8–9.
 
-- [ ] **Step 11: Commit the reviewed task**
+- [ ] **Step 11: Run live stable-app verification**
+
+Run:
+
+```bash
+./scripts/run-dev.sh
+```
+
+Use `Control-Option-C` to dictate a synthetic test containing quoted terms such as `pods`, `pod pods`, and `pod pod`. Stop capture, choose Formal, and confirm three Formal variants appear without the raw `CrispResult.ParseError` message. Confirm `/tmp/crispvoice-debug.log` contains only the existing lengths/fingerprints and status metadata, never the transcript, generated variants, malformed response, or API key.
+
+- [ ] **Step 12: Commit the reviewed and live-verified task**
 
 ```bash
 git add Sources/CrispVoice/Crisp/CrispPrompt.swift \
@@ -333,13 +343,3 @@ git add Sources/CrispVoice/Crisp/CrispPrompt.swift \
   Tests/CrispVoiceTests/CrispResultTests.swift
 git commit -m "fix: recover from invalid Formal JSON"
 ```
-
-- [ ] **Step 12: Run live stable-app verification**
-
-Run:
-
-```bash
-./scripts/run-dev.sh
-```
-
-Use `Control-Option-C` to dictate a synthetic test containing quoted terms such as `pods`, `pod pods`, and `pod pod`. Stop capture, choose Formal, and confirm three Formal variants appear without the raw `CrispResult.ParseError` message. Confirm `/tmp/crispvoice-debug.log` contains only the existing lengths/fingerprints and status metadata, never the transcript, generated variants, malformed response, or API key.
