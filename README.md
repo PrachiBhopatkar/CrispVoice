@@ -166,13 +166,13 @@ The app intentionally does not use the Mac App Store sandbox because Accessibili
 
 ## Installation
 
-For technical early adopters, CrispVoice can be installed or upgraded from Terminal:
+For technical users, CrispVoice can be installed or upgraded from Terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kirtanework/CrispVoice/main/scripts/install.sh | /bin/bash
 ```
 
-This command downloads the latest public GitHub Release, verifies its checksum, universal architecture, bundle identity, and pinned CrispVoice self-signed certificate, then installs it at `~/Applications/CrispVoice.app` without `sudo`. The installer explains that the app is not Apple-notarized and removes quarantine only from the installed CrispVoice app. A published early-access GitHub Release is required before this command can install a build.
+This command downloads the latest public GitHub Release, verifies its checksum, universal architecture, bundle identity, and pinned CrispVoice self-signed certificate, then installs it at `~/Applications/CrispVoice.app` without `sudo`. The installer explains that the app is not Apple-notarized and removes quarantine only from the installed CrispVoice app.
 
 After installation:
 
@@ -184,9 +184,9 @@ After installation:
 
 ## Project Status
 
-CrispVoice is currently an early macOS MVP. The core workflow includes global hotkey recording, live on-device transcription, Claude-powered rewriting, message variants, tone controls, secure API-key storage, permission guidance, and paste-back into the previously focused application.
+CrispVoice is currently a macOS MVP. The core workflow includes global hotkey recording, live on-device transcription, Claude-powered rewriting, message variants, tone controls, secure API-key storage, permission guidance, and paste-back into the previously focused application.
 
-The current release tag is `v0.1.0-mvp`.
+The current release is `v0.2.0`.
 
 ## Requirements
 
