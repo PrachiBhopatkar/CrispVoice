@@ -166,15 +166,21 @@ The app intentionally does not use the Mac App Store sandbox because Accessibili
 
 ## Installation
 
-A public CrispVoice release will be distributed as a signed and notarized macOS application.
+For technical early adopters, CrispVoice can be installed or upgraded from Terminal:
 
-1. Download CrispVoice from GitHub Releases.
-2. Move CrispVoice to the Applications folder.
-3. Grant Microphone, Speech Recognition, and Accessibility permissions.
-4. Add your Anthropic API key in CrispVoice Settings.
-5. Place the cursor in the application where you want to write.
-6. Press `Control + Option + C` to begin dictating.
-7. Press the hotkey again to stop and generate message variants.
+```bash
+curl -fsSL https://raw.githubusercontent.com/kirtanework/CrispVoice/main/scripts/install.sh | /bin/bash
+```
+
+This command downloads the latest public GitHub Release, verifies its checksum, universal architecture, bundle identity, and pinned CrispVoice self-signed certificate, then installs it at `~/Applications/CrispVoice.app` without `sudo`. The installer explains that the app is not Apple-notarized and removes quarantine only from the installed CrispVoice app. A published early-access GitHub Release is required before this command can install a build.
+
+After installation:
+
+1. Grant Microphone, Speech Recognition, and Accessibility permissions.
+2. Add your Anthropic API key in CrispVoice Settings.
+3. Place the cursor in the application where you want to write.
+4. Press `Control + Option + C` to begin dictating.
+5. Press the hotkey again to stop and generate message variants.
 
 ## Project Status
 
