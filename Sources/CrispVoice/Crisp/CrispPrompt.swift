@@ -38,6 +38,19 @@ enum CrispPrompt {
         that are not supported by the transcript.
         Return ONLY valid JSON of the form: {"variants": ["...", "..."]} with exactly \(variantCount) \
         distinct variants, best first. No prose outside the JSON.
+        Each `variants` item must be a JSON string, never an object; `variants` must be an array of JSON \
+        strings. Encode line breaks inside each string as \\n, not literal line breaks, and embedded quotation \
+        marks as \\"; do not place literal line breaks inside a quoted JSON string.
+        """
+    }
+
+    static func repairSystem(variantCount: Int) -> String {
+        system(variantCount: variantCount) + """
+
+
+        The previous response could not be parsed. Try exactly once more. Return only the required \
+        JSON object with an array of JSON strings. Encode line breaks as \\n and embedded quotation \
+        marks as \\".
         """
     }
 

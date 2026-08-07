@@ -46,13 +46,13 @@
 - Modify: `README.md:205-220`
 
 **Interfaces:**
-- `cv_dev_die MESSAGE` — prints `Error: MESSAGE` to stderr and returns nonzero by exiting the caller.
+- `cv_dev_die MESSAGE` — prints `Error: MESSAGE` to stderr and returns nonzero; the orchestration script exits at the call site.
 - `cv_dev_parse_apple_identity_lines` — reads `security find-identity` output from stdin and writes `SHA1<TAB>DISPLAY_NAME` for every valid `Apple Development:` identity.
 - `cv_dev_require_single_identity SECURITY_OUTPUT` — writes exactly one `SHA1<TAB>DISPLAY_NAME`; fails for zero or multiple matches.
 - `cv_dev_require_bundle APP_PATH EXPECTED_BUNDLE_ID PLUTIL_BIN` — validates a real app directory, regular `Info.plist`, safe executable name, regular executable, and exact bundle identifier; writes the executable path.
 - `cv_dev_require_signing APP_PATH EXPECTED_SHA1 CODESIGN_BIN SHASUM_BIN` — requires strict code-signature verification, a leaf certificate with the selected fingerprint, a non-ad-hoc signature, a non-empty Team Identifier, and a designated requirement that does not contain `cdhash`.
 - `cv_dev_physical_path PATH` — writes the normalized physical path for an existing file or directory.
-- `cv_dev_require_launched_path EXPECTED_EXECUTABLE ACTUAL_COMMAND` — compares normalized executable paths and rejects arguments or a different app path.
+- `cv_dev_require_launched_path EXPECTED_EXECUTABLE ACTUAL_COMMAND` — compares the complete command string with the normalized expected executable path. Spaces inside the path are valid; appended arguments or a different app path are rejected because the complete strings differ.
 - Test mode is enabled only by `CRISPVOICE_DEV_LAUNCHER_TEST_MODE=1`. Only in that mode may `CRISPVOICE_DEV_ROOT_OVERRIDE`, `CRISPVOICE_DEV_TOOL_DIR`, and `CRISPVOICE_DEV_LAUNCH_TIMEOUT_ATTEMPTS` affect behavior. Any of those variables outside test mode is an error.
 - Production output ends with both `Launched stable dev build: <physical app path>` and `Signing identity: <Apple Development display name>`.
 
@@ -157,7 +157,7 @@ cv_dev_require_stable_signing_text() {
 }
 ```
 
-Complete the remaining declared functions using quoted paths and system Bash 3.2 syntax. `cv_dev_require_bundle` must use `plutil -extract ... raw -o -`; `cv_dev_require_signing` must capture `codesign --display --verbose=4 --requirements -`, extract certificate zero into a private temporary directory, compare the uppercase DER SHA-1 with `EXPECTED_SHA1`, and remove its temporary directory on every return. `cv_dev_require_launched_path` must reject whitespace-delimited arguments and compare physical paths without using `realpath`, which is not guaranteed on the minimum supported macOS.
+Complete the remaining declared functions using quoted paths and system Bash 3.2 syntax. Require every parsed identity fingerprint to contain exactly 40 uppercase hexadecimal characters. `cv_dev_require_bundle` must use `plutil -extract ... raw -o -`; `cv_dev_require_signing` must capture `codesign --display --verbose=4 --requirements -`, extract certificate zero into a private temporary directory, compare the uppercase DER SHA-1 with `EXPECTED_SHA1`, and remove its temporary directory on every return. `cv_dev_require_launched_path` must allow spaces within the expected executable path, require the actual process command to equal that complete path with no appended arguments, and compare physical paths without using `realpath`, which is not guaranteed on the minimum supported macOS.
 
 - [ ] **Step 4: Run the unit test and confirm it passes**
 
@@ -172,7 +172,7 @@ Expected: syntax check succeeds and `DevLaunchLibTests: PASS`.
 
 - [ ] **Step 5: Write failing integration tests for orchestration and rollback**
 
-Create `Tests/DevScripts/RunDevTests.sh`. It must create a private fixture root and fake tool directory, copy `scripts/run-dev.sh` and `scripts/dev-launch-lib.sh` into the fixture, and invoke the launcher only with:
+Create `Tests/DevScripts/RunDevTests.sh`. It must create a private fixture root and fake tool directory, then invoke the repository launcher only with:
 
 ```bash
 CRISPVOICE_DEV_LAUNCHER_TEST_MODE=1 \
@@ -331,4 +331,3 @@ Stage A checks every requirement in `docs/superpowers/specs/2026-08-06-stable-de
 git add AGENTS.md README.md scripts/run-dev.sh scripts/dev-launch-lib.sh Tests/DevScripts/DevLaunchLibTests.sh Tests/DevScripts/RunDevTests.sh
 git commit -m "fix: always launch stable signed development build"
 ```
-

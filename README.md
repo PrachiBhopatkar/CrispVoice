@@ -8,6 +8,8 @@ Read a message in Slack, Microsoft Outlook, Mail, Teams, or another application.
 
 No separate drafting window. No platform-specific integration. No switching away from the conversation.
 
+**Default hotkey:** Press `Control + Option + C` to start CrispVoice dictation, then press the same hotkey again to stop recording and generate message variants.
+
 ## The Problem
 
 AI assistants such as Claude and Codex can connect to communication tools through APIs and MCP integrations. These workflows can retrieve messages, summarize conversations, and help draft responses.
@@ -29,9 +31,9 @@ CrispVoice is designed for these quick-turnaround moments.
 It does not need to retrieve or recreate the surrounding conversation. You read the message and absorb its context in the native application. CrispVoice then helps you express your response clearly without moving you into a separate drafting environment.
 
 1. Place your cursor in the application where you want to respond.
-2. Press the global CrispVoice hotkey.
+2. Press `Control + Option + C` to start CrispVoice.
 3. Speak your response naturally.
-4. Press the hotkey again to stop.
+4. Press `Control + Option + C` again to stop recording.
 5. CrispVoice converts your dictation into structured message variants.
 6. Choose a Direct, Warmer, or Formal version.
 7. The selected message is pasted back into the application where you started.
@@ -135,7 +137,7 @@ The only content-bearing network request is the rewrite request sent directly to
 ## Architecture
 
 ```text
-Global hotkey
+Global hotkey (`Control + Option + C`)
       |
       v
 Microphone capture
@@ -214,6 +216,8 @@ The included helper builds and launches a stable development copy:
 ```bash
 ./scripts/run-dev.sh
 ```
+
+This is the supported development launch path. It signs and opens DevBuild/CrispVoice.app so macOS can preserve Accessibility permission across rebuilds; direct Xcode Run is not covered by this workflow.
 
 ### Test
 
