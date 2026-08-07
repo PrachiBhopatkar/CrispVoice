@@ -17,6 +17,13 @@
 
 ---
 
+## Progress
+
+- **Task 1: implemented and reviewer-approved** — commit `751e256` "feat: replace Shorter tone with Formal tone" (base `bd04475`). Task reviewer verdict: ✅ spec compliant, no Critical/Important issues, task quality Approved.
+- Local commits (`docs: add design spec` → `751e256`) are not yet pushed to `origin/main`.
+- Remaining before this plan is fully done: Step 6b (manual verification — launch the app, dictate, confirm the Formal button behaves correctly in the live panel; requires a human, not automatable), then push.
+- Minor reviewer notes, not fixed (optional polish, not spec gaps): the system prompt's tone-override clause reads a bit buried mid-sentence; no test asserts `Tone.allCases.count == 4` / absence of `.shorter`.
+
 ### Task 1: Replace Shorter tone with Formal tone (prompt + UI)
 
 **Files:**
@@ -30,7 +37,7 @@
 
 Both files must change together: `SuggestionView.swift` currently references `.shorter`, so the project will fail to compile (and therefore fail to test) if `CrispPrompt.swift` is edited alone. This task treats them as one atomic change.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add these three tests to `Tests/CrispVoiceTests/CrispPromptTests.swift`, inside the existing `CrispPromptTests` class (after `test_user_embedsRawTranscriptAndTone`):
 
@@ -54,12 +61,12 @@ Add these three tests to `Tests/CrispVoiceTests/CrispPromptTests.swift`, inside 
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' test`
 Expected: FAIL to build — `type 'Tone' has no member 'formal'` (referenced by the new tests). This is a compile-time failure, which `xcodebuild test` reports as a build failure rather than a test failure; that is the expected "red" state for this step.
 
-- [ ] **Step 3: Replace the `Tone` enum and system prompt in `CrispPrompt.swift`**
+- [x] **Step 3: Replace the `Tone` enum and system prompt in `CrispPrompt.swift`**
 
 Replace the full contents of `Sources/CrispVoice/Crisp/CrispPrompt.swift` with:
 
@@ -118,7 +125,7 @@ enum CrispPrompt {
 }
 ```
 
-- [ ] **Step 4: Update the tone buttons in `SuggestionView.swift`**
+- [x] **Step 4: Update the tone buttons in `SuggestionView.swift`**
 
 In `Sources/CrispVoice/UI/SuggestionView.swift`, find this block (inside the `if model.showsVariantButtons` section of `SuggestionView.body`):
 
@@ -148,12 +155,13 @@ Replace it with:
             }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' test`
 Expected: `** TEST SUCCEEDED **` — all `CrispPromptTests` pass (including the 3 new tests and the 2 pre-existing ones), and every other existing test target (`PasteboardTests`, `AudioConverterTests`, `CrispResultTests`, `AnthropicClientTests`, `CrispEngineTests`, `KeychainStoreTests`, `PreferencesTests`, `SuggestionModelTests`, `TranscriberTests`, `PermissionsManagerTests`) still passes since none of them reference `Tone`.
 
-- [ ] **Step 6: Build and manually verify the panel**
+- [x] **Step 6a: Build** (verified by implementer — `** BUILD SUCCEEDED **`)
+- [ ] **Step 6b: Manually verify the panel** (still pending — requires a human at the mic; no subagent can do this)
 
 Run:
 ```bash
@@ -164,7 +172,7 @@ Expected: `** BUILD SUCCEEDED **`.
 
 Then launch the app (`open` the built `.app` as in prior phases), dictate a message, and confirm the suggestion panel's tone row now reads **Direct · Warmer · Formal · Regenerate** (no "Shorter"). Click **Formal** and confirm the regenerated variant reads as a formal message with a greeting/sign-off (e.g., "Hi," / "Best,") even though none was dictated.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Sources/CrispVoice/Crisp/CrispPrompt.swift Sources/CrispVoice/UI/SuggestionView.swift Tests/CrispVoiceTests/CrispPromptTests.swift

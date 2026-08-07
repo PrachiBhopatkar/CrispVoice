@@ -4,11 +4,14 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum AppDelegateError: LocalizedError {
         case missingAPIKey
+        case microphoneAccessDenied
 
         var errorDescription: String? {
             switch self {
             case .missingAPIKey:
                 return "Set your Anthropic API key in Settings to continue."
+            case .microphoneAccessDenied:
+                return "Enable Microphone access for CrispVoice in System Settings to dictate."
             }
         }
     }
@@ -71,7 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Task {
-            _ = await PermissionsManager.requestMicrophone()
+            let microphoneGranted = await PermissionsManager.requestMicrophone()
+            DebugLog.write("AppDelegate.microphonePermission granted=\(microphoneGranted)")
             _ = await PermissionsManager.requestSpeechRecognition()
         }
     }
@@ -111,6 +115,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { [weak self] in
             guard let self else { return }
+
+            guard await PermissionsManager.requestMicrophone() else {
+                await fail(AppDelegateError.microphoneAccessDenied)
+                await MainActor.run {
+                    self.statusItem.button?.title = "🎙️"
+                }
+                self.isPreparingCapture = false
+                return
+            }
+
             do {
                 try await transcriber.startLiveTranscription { [weak self] transcript in
                     Task { @MainActor in
