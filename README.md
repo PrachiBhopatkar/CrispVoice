@@ -169,7 +169,7 @@ The app intentionally does not use the Mac App Store sandbox because Accessibili
 For technical users, CrispVoice can be installed or upgraded from Terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kirtanework/CrispVoice/main/scripts/install.sh | /bin/bash
+curl -fsSL https://raw.githubusercontent.com/PrachiBhopatkar/CrispVoice/main/scripts/install.sh | /bin/bash
 ```
 
 This command downloads the latest public GitHub Release, verifies its checksum, universal architecture, bundle identity, and pinned CrispVoice self-signed certificate, then installs it at `~/Applications/CrispVoice.app` without `sudo`. The installer explains that the app is not Apple-notarized and removes quarantine only from the installed CrispVoice app.

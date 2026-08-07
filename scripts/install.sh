@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly REPOSITORY="kirtanework/CrispVoice"
+readonly REPOSITORY="PrachiBhopatkar/CrispVoice"
 readonly APP_NAME="CrispVoice"
 readonly BUNDLE_ID="com.crispvoice.app"
 readonly MINIMUM_MACOS="13.0"

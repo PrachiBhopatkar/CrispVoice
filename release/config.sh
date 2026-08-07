@@ -2,7 +2,7 @@
 
 _RELEASE_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-readonly CRISPVOICE_REPOSITORY="kirtanework/CrispVoice"
+readonly CRISPVOICE_REPOSITORY="PrachiBhopatkar/CrispVoice"
 readonly CRISPVOICE_APP_NAME="CrispVoice"
 readonly CRISPVOICE_BUNDLE_ID="com.crispvoice.app"
 readonly CRISPVOICE_MIN_MACOS="13.0"

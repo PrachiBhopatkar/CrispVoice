@@ -6,7 +6,7 @@ source "$ROOT_DIR/release/config.sh"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-[[ "$CRISPVOICE_REPOSITORY" == "kirtanework/CrispVoice" ]] || fail "repository"
+[[ "$CRISPVOICE_REPOSITORY" == "PrachiBhopatkar/CrispVoice" ]] || fail "repository"
 [[ "$CRISPVOICE_APP_NAME" == "CrispVoice" ]] || fail "app name"
 [[ "$CRISPVOICE_BUNDLE_ID" == "com.crispvoice.app" ]] || fail "bundle id"
 [[ "$CRISPVOICE_MIN_MACOS" == "13.0" ]] || fail "minimum macOS"
