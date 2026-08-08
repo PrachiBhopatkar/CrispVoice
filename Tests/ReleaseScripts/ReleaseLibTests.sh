@@ -10,6 +10,15 @@ trap '/bin/rm -rf "$TEST_TEMP"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 expect_success() { "$@" >/dev/null 2>&1 || fail "expected success: $*"; }
 expect_failure() { if "$@" >/dev/null 2>&1; then fail "expected failure: $*"; fi; }
+expect_audio_input_failure() {
+  local output
+
+  if output="$("$@" 2>&1)"; then
+    fail "expected failure: $*"
+  fi
+  [[ "$output" == *"Signed app is missing the required Boolean Audio Input entitlement."* ]] \
+    || fail "expected Audio Input entitlement error: $output"
+}
 
 expect_success cv_validate_version "0.2.0"
 expect_success cv_validate_version "12.34.56"
@@ -21,6 +30,24 @@ expect_success cv_require_universal_arches "x86_64 arm64"
 expect_failure cv_require_universal_arches "arm64"
 expect_failure cv_require_universal_arches "arm64 x86_64 i386"
 [[ "$(cv_uppercase abcdef0123)" == "ABCDEF0123" ]] || fail "uppercase"
+
+true_plist="$TEST_TEMP/audio-input-true.plist"
+false_plist="$TEST_TEMP/audio-input-false.plist"
+string_plist="$TEST_TEMP/audio-input-string.plist"
+missing_plist="$TEST_TEMP/audio-input-missing.plist"
+
+/usr/bin/plutil -create xml1 "$true_plist"
+/usr/bin/plutil -insert 'com\.apple\.security\.device\.audio-input' -bool true "$true_plist"
+/usr/bin/plutil -create xml1 "$false_plist"
+/usr/bin/plutil -insert 'com\.apple\.security\.device\.audio-input' -bool false "$false_plist"
+/usr/bin/plutil -create xml1 "$string_plist"
+/usr/bin/plutil -insert 'com\.apple\.security\.device\.audio-input' -string true "$string_plist"
+/usr/bin/plutil -create xml1 "$missing_plist"
+
+expect_success cv_require_audio_input_entitlement "$true_plist" /usr/bin/plutil
+expect_audio_input_failure cv_require_audio_input_entitlement "$false_plist" /usr/bin/plutil
+expect_audio_input_failure cv_require_audio_input_entitlement "$string_plist" /usr/bin/plutil
+expect_audio_input_failure cv_require_audio_input_entitlement "$missing_plist" /usr/bin/plutil
 
 expected_entitlements="$TEST_TEMP/CrispVoice.entitlements"
 sign_marker="$TEST_TEMP/release-sign-called"

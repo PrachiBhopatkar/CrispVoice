@@ -95,6 +95,19 @@ require_real_directory() {
   [[ -d "$path" ]] || die "Installation root must be a directory: $path"
 }
 
+require_audio_input_entitlement() {
+  local entitlements_plist="$1"
+  local audio_input
+
+  audio_input="$(/usr/bin/plutil \
+    -extract 'com\.apple\.security\.device\.audio-input' raw \
+    -expect bool -o - "$entitlements_plist" 2>/dev/null)" || {
+      die "Signed app is missing the required Boolean Audio Input entitlement."
+    }
+  [[ "$audio_input" == true ]] \
+    || die "Signed app is missing the required Boolean Audio Input entitlement."
+}
+
 verify_extracted_app() {
   local app_path="$1"
   local version="$2"
@@ -106,6 +119,7 @@ verify_extracted_app() {
   local executable_path
   local architectures
   local certificate_prefix="$temp_dir/certificate"
+  local entitlements_plist="$temp_dir/entitlements.plist"
   local actual_certificate_sha256
 
   [[ "$(/usr/bin/basename "$app_path")" == "$APP_NAME.app" ]] \
@@ -141,6 +155,14 @@ verify_extracted_app() {
 
   /usr/bin/codesign --verify --deep --strict --verbose=2 "$app_path" \
     || die "The release application failed strict code-signature verification."
+
+  /usr/bin/codesign \
+    --display \
+    --entitlements "$entitlements_plist" \
+    --xml \
+    "$app_path" >/dev/null 2>&1 \
+    || die "Unable to read signed app entitlements."
+  require_audio_input_entitlement "$entitlements_plist"
 
   /usr/bin/codesign --display --extract-certificates="$certificate_prefix" "$app_path" \
     || die "Unable to extract the release signing certificate."

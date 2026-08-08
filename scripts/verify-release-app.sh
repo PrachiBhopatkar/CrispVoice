@@ -39,6 +39,15 @@ cv_require_universal_arches "$architectures" || cv_die "Release executable must 
 certificate_dir="$(mktemp -d -t crispvoice-release-certificates)"
 trap '/bin/rm -rf "$certificate_dir"' EXIT
 certificate_prefix="$certificate_dir/certificate"
+entitlements_plist="$certificate_dir/entitlements.plist"
+
+/usr/bin/codesign \
+  --display \
+  --entitlements "$entitlements_plist" \
+  --xml \
+  "$APP_PATH" >/dev/null 2>&1 \
+  || cv_die "Unable to read signed app entitlements."
+cv_require_audio_input_entitlement "$entitlements_plist" /usr/bin/plutil
 
 /usr/bin/codesign --display --extract-certificates="$certificate_prefix" "$APP_PATH"
 [[ -f "${certificate_prefix}0" ]] || cv_die "Release signature has no leaf certificate."

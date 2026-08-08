@@ -24,6 +24,23 @@ cv_plist_string() {
   /usr/bin/plutil -extract "$1" raw -o - "$2"
 }
 
+cv_require_audio_input_entitlement() {
+  local entitlements_plist="$1"
+  local plutil_bin="$2"
+  local audio_input
+
+  audio_input="$("$plutil_bin" \
+    -extract 'com\.apple\.security\.device\.audio-input' raw \
+    -expect bool -o - "$entitlements_plist" 2>/dev/null)" || {
+      cv_die "Signed app is missing the required Boolean Audio Input entitlement."
+      return 1
+    }
+  [[ "$audio_input" == true ]] || {
+    cv_die "Signed app is missing the required Boolean Audio Input entitlement."
+    return 1
+  }
+}
+
 cv_certificate_sha256() {
   /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print toupper($1)}'
 }

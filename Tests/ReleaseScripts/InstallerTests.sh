@@ -55,6 +55,51 @@ bundle_executable="$(/usr/bin/plutil -extract CFBundleExecutable raw -o - \
 installed_executable="$destination/Contents/MacOS/$bundle_executable"
 original_executable_sha256="$(/usr/bin/shasum -a 256 "$installed_executable" | /usr/bin/awk '{print $1}')"
 
+missing_entitlement_extract="$TEST_TEMP/missing-entitlement-extract"
+missing_entitlement_app="$missing_entitlement_extract/CrispVoice.app"
+/bin/mkdir "$missing_entitlement_extract"
+/usr/bin/ditto -x -k "$ARCHIVE" "$missing_entitlement_extract"
+/usr/bin/codesign \
+  --force \
+  --sign "$CRISPVOICE_SIGNING_IDENTITY_SHA1" \
+  --options runtime \
+  --timestamp=none \
+  --requirements "=designated => certificate leaf = H\"$CRISPVOICE_SIGNING_IDENTITY_SHA1\" and identifier \"$CRISPVOICE_BUNDLE_ID\"" \
+  "$missing_entitlement_app"
+
+missing_entitlement_output="$(/usr/bin/codesign --display --entitlements - --xml "$missing_entitlement_app" 2>&1)"
+[[ "$missing_entitlement_output" != *"<plist"* ]] \
+  || fail "negative fixture unexpectedly emitted an entitlement plist"
+
+/usr/bin/ditto -c -k --keepParent "$missing_entitlement_app" "$release_dir/$ARCHIVE_BASENAME"
+(
+  cd "$release_dir"
+  /usr/bin/shasum -a 256 "$ARCHIVE_BASENAME" > "$ARCHIVE_BASENAME.sha256"
+)
+
+set +e
+output="$(run_installer 2>&1)"
+status=$?
+set -e
+[[ "$status" -ne 0 ]] || fail "installer accepted a signed app without Audio Input entitlement"
+[[ "$output" == *"Signed app is missing the required Boolean Audio Input entitlement."* ]] \
+  || fail "installer rejected the fixture for the wrong reason: $output"
+
+after_rejection_sha256="$(/usr/bin/shasum -a 256 "$installed_executable" | /usr/bin/awk '{print $1}')"
+[[ "$after_rejection_sha256" == "$original_executable_sha256" ]] \
+  || fail "missing-entitlement release changed the installed executable"
+
+set +e
+output="$("$ROOT_DIR/scripts/verify-release-app.sh" "$missing_entitlement_app" 0.2.0 2>&1)"
+status=$?
+set -e
+[[ "$status" -ne 0 ]] || fail "release verifier accepted a signed app without Audio Input entitlement"
+[[ "$output" == *"Signed app is missing the required Boolean Audio Input entitlement."* ]] \
+  || fail "release verifier rejected the fixture for the wrong reason: $output"
+
+/bin/cp "$ARCHIVE" "$release_dir/$ARCHIVE_BASENAME"
+/bin/cp "$CHECKSUM" "$release_dir/$ARCHIVE_BASENAME.sha256"
+
 /usr/bin/printf 'corrupted archive\n' > "$release_dir/$ARCHIVE_BASENAME"
 if run_installer >/dev/null 2>&1; then
   fail "installer accepted a corrupted archive"
