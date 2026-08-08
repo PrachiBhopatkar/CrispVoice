@@ -111,16 +111,24 @@ Expected: `ReleaseLibTests.sh` fails because `cv_sign_release_app` is undefined.
 
 - [ ] **Step 3: Add failing development signing tests**
 
-In `Tests/DevScripts/RunDevTests.sh`, create the fixture entitlement at `Sources/CrispVoice/App/CrispVoice.entitlements`. Change the fake `codesign` signing branch so success requires:
+In `Tests/DevScripts/RunDevTests.sh`, create the fixture entitlement at `Sources/CrispVoice/App/CrispVoice.entitlements` and nested code under a standard macOS nested-code root. Change the fake `codesign` signing branches so success requires the nested candidate to be signed first without application entitlements:
 
 ```bash
---force --deep --sign AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
+--force --sign AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
+--options runtime \
+"$nested_candidate"
+```
+
+Then require the outer app to be signed last with the entitlement file and without signing-time `--deep`:
+
+```bash
+--force --sign AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
 --options runtime \
 --entitlements "$CV_TEST_FIXTURE_ROOT/Sources/CrispVoice/App/CrispVoice.entitlements" \
 "$staged_app"
 ```
 
-Make the fake signature display include `flags=0x10000(runtime)`. Add a display-entitlements branch that writes a Boolean-true plist to the requested output path.
+Retain `--deep` only for strict verification. Make the fake signature display include `flags=0x10000(runtime)`. Add a display-entitlements branch that writes a Boolean-true plist to the requested output path, and assert a nested-signing failure preserves the prior stable app.
 
 In `Tests/DevScripts/DevLaunchLibTests.sh`, expand the fake signer to support three literal scenarios:
 
@@ -210,12 +218,11 @@ In `scripts/run-dev.sh`, define:
 ENTITLEMENTS_PATH="$ROOT_DIR/Sources/CrispVoice/App/CrispVoice.entitlements"
 ```
 
-Validate that it is a regular non-symlink before XcodeGen runs. Replace the staged-app signing invocation with:
+Validate that it is a regular non-symlink before XcodeGen runs. Sign nested code inside-out using the release builder's standard roots and candidate policy, without app entitlements. Then sign the staged app last with the entitlement file (and without signing-time `--deep`):
 
 ```bash
 "$CODESIGN_BIN" \
   --force \
-  --deep \
   --sign "$selected_sha1" \
   --options runtime \
   --entitlements "$ENTITLEMENTS_PATH" \

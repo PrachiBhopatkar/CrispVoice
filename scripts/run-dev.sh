@@ -149,9 +149,43 @@ staging_dir="$("$MKTEMP_BIN" -d "$STABLE_DIR/.CrispVoice-stage.XXXXXX")"
 staged_app="$staging_dir/$APP_NAME"
 "$DITTO_BIN" "$SOURCE_APP" "$staged_app"
 [[ -d "$staged_app" && ! -L "$staged_app" ]] || cv_dev_die "Staged app must be a real directory"
+
+# Sign standard nested code from the inside out. Application-only entitlements
+# belong on the outer app signature and must never propagate to nested code.
+nested_candidates="$staging_dir/nested-code.txt"
+: > "$nested_candidates"
+
+for relative_root in Frameworks PlugIns XPCServices Helpers; do
+  search_root="$staged_app/Contents/$relative_root"
+  [[ -d "$search_root" ]] || continue
+
+  /usr/bin/find -P "$search_root" \
+    \( -type d \( -name '*.app' -o -name '*.appex' -o -name '*.bundle' -o -name '*.framework' -o -name '*.plugin' -o -name '*.xpc' \) -o -type f \) \
+    -print \
+    | while IFS= read -r candidate; do
+        if [[ -d "$candidate" ]]; then
+          printf '%s\n' "$candidate"
+        elif [[ ! -L "$candidate" ]] && /usr/bin/file -b "$candidate" | /usr/bin/grep -q '^Mach-O'; then
+          printf '%s\n' "$candidate"
+        fi
+      done
+done \
+  | /usr/bin/awk '{ print length($0) "\t" $0 }' \
+  | /usr/bin/sort -rn \
+  | /usr/bin/cut -f2- \
+  > "$nested_candidates"
+
+while IFS= read -r candidate; do
+  [[ -n "$candidate" && -e "$candidate" ]] || continue
+  "$CODESIGN_BIN" \
+    --force \
+    --sign "$selected_sha1" \
+    --options runtime \
+    "$candidate"
+done < "$nested_candidates"
+
 "$CODESIGN_BIN" \
   --force \
-  --deep \
   --sign "$selected_sha1" \
   --options runtime \
   --entitlements "$ENTITLEMENTS_PATH" \
