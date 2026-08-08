@@ -155,24 +155,38 @@ staged_app="$staging_dir/$APP_NAME"
 nested_candidates="$staging_dir/nested-code.txt"
 : > "$nested_candidates"
 
-for relative_root in Frameworks PlugIns XPCServices Helpers; do
-  search_root="$staged_app/Contents/$relative_root"
-  [[ -d "$search_root" ]] || continue
+{
+  for relative_root in Frameworks PlugIns XPCServices Helpers; do
+    search_root="$staged_app/Contents/$relative_root"
+    [[ -d "$search_root" ]] || continue
 
-  /usr/bin/find -P "$search_root" \
-    \( -type d \( -name '*.app' -o -name '*.appex' -o -name '*.bundle' -o -name '*.framework' -o -name '*.plugin' -o -name '*.xpc' \) -o -type f \) \
-    -print \
-    | while IFS= read -r candidate; do
-        if [[ -d "$candidate" ]]; then
-          printf '%s\n' "$candidate"
-        elif [[ ! -L "$candidate" ]] && /usr/bin/file -b "$candidate" | /usr/bin/grep -q '^Mach-O'; then
-          printf '%s\n' "$candidate"
-        fi
-      done
-done \
+    /usr/bin/find -P "$search_root" \
+      \( -type d \( -name '*.app' -o -name '*.appex' -o -name '*.bundle' -o -name '*.framework' -o -name '*.plugin' -o -name '*.xpc' \) -o -type f \) \
+      -print \
+      | while IFS= read -r candidate; do
+          if [[ -d "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+          elif [[ ! -L "$candidate" ]] && /usr/bin/file -b "$candidate" | /usr/bin/grep -q '^Mach-O'; then
+            printf '%s\n' "$candidate"
+          fi
+        done
+  done
+
+  macos_root="$staged_app/Contents/MacOS"
+  if [[ -d "$macos_root" ]]; then
+    /usr/bin/find -P "$macos_root" -type f -print \
+      | while IFS= read -r candidate; do
+          if [[ "$candidate" != "$staged_app/Contents/MacOS/CrispVoice" && ! -L "$candidate" ]] \
+            && /usr/bin/file -b "$candidate" | /usr/bin/grep -q '^Mach-O'; then
+            printf '%s\n' "$candidate"
+          fi
+        done
+  fi
+} \
   | /usr/bin/awk '{ print length($0) "\t" $0 }' \
   | /usr/bin/sort -rn \
   | /usr/bin/cut -f2- \
+  | /usr/bin/awk '!seen[$0]++' \
   > "$nested_candidates"
 
 while IFS= read -r candidate; do

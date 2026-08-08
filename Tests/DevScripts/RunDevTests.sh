@@ -50,7 +50,8 @@ case "$tool" in
     /bin/mkdir -p "$derived/Build/Products/Debug/CrispVoice.app/Contents/MacOS"
     /bin/mkdir -p "$derived/Build/Products/Debug/CrispVoice.app/Contents/Frameworks/Fixture.framework"
     /usr/bin/touch "$derived/Build/Products/Debug/CrispVoice.app/Contents/Info.plist"
-    /usr/bin/touch "$derived/Build/Products/Debug/CrispVoice.app/Contents/MacOS/CrispVoice"
+    /usr/bin/printf '\317\372\355\376' > "$derived/Build/Products/Debug/CrispVoice.app/Contents/MacOS/CrispVoice"
+    /usr/bin/printf '\317\372\355\376' > "$derived/Build/Products/Debug/CrispVoice.app/Contents/MacOS/CrispVoice.debug.dylib"
     ;;
   plutil)
     if [[ "$1" == -extract && "$2" == 'com\.apple\.security\.device\.audio-input' && "$3" == raw && "$4" == -expect && "$5" == bool && "$6" == -o && "$7" == - && $# -eq 8 ]]; then
@@ -92,11 +93,16 @@ case "$tool" in
     fi
     if [[ "$1" == --force && "$2" == --sign && "$3" == AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA && "$4" == --options && "$5" == runtime && "$6" == "$staged_app"*"/CrispVoice.app/Contents/Frameworks/Fixture.framework" && $# -eq 6 ]]; then
       [[ "$scenario" != nested_sign_failure ]] || exit 1
-      /usr/bin/touch "$CV_TEST_FIXTURE_ROOT/nested-sign-called"
+      /usr/bin/touch "$CV_TEST_FIXTURE_ROOT/framework-sign-called"
+      exit 0
+    fi
+    if [[ "$1" == --force && "$2" == --sign && "$3" == AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA && "$4" == --options && "$5" == runtime && "$6" == "$staged_app"*"/CrispVoice.app/Contents/MacOS/CrispVoice.debug.dylib" && $# -eq 6 ]]; then
+      [[ "$scenario" != dylib_sign_failure ]] || exit 1
+      /usr/bin/touch "$CV_TEST_FIXTURE_ROOT/dylib-sign-called"
       exit 0
     fi
     if [[ "$1" == --force && "$2" == --sign && "$3" == AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA && "$4" == --options && "$5" == runtime && "$6" == --entitlements && "$7" == "$CV_TEST_FIXTURE_ROOT/Sources/CrispVoice/App/CrispVoice.entitlements" && "$8" == "$staged_app"*"/CrispVoice.app" && $# -eq 8 ]]; then
-      [[ -e "$CV_TEST_FIXTURE_ROOT/nested-sign-called" ]] || exit 96
+      [[ -e "$CV_TEST_FIXTURE_ROOT/framework-sign-called" && -e "$CV_TEST_FIXTURE_ROOT/dylib-sign-called" ]] || exit 96
       [[ "$scenario" != sign_failure ]] || exit 1
       exit 0
     fi
@@ -141,7 +147,7 @@ done
 run_launcher() {
   local scenario="$1"
   printf '%s\n' "$scenario" > "$fixture_root/scenario"
-  /bin/rm -f "$fixture_root/launched" "$fixture_root/nested-sign-called" "$tool_log" "$output_log"
+  /bin/rm -f "$fixture_root/launched" "$fixture_root/framework-sign-called" "$fixture_root/dylib-sign-called" "$tool_log" "$output_log"
   /bin/rm -rf "$fixture_root/.build"
   /bin/mkdir -p "$fixture_root/DevBuild/CrispVoice.app"
   printf '%s\n' prior > "$fixture_root/DevBuild/CrispVoice.app/marker"
@@ -174,12 +180,15 @@ run_preflight_without_stable() {
 
 run_launcher success || fail "success scenario failed"
 [[ -d "$fixture_root/DevBuild/CrispVoice.app" ]] || fail "stable app missing after success"
-[[ -e "$fixture_root/nested-sign-called" ]] || fail "nested Frameworks fixture was not signed before the app"
+[[ -e "$fixture_root/framework-sign-called" ]] || fail "nested Frameworks fixture was not signed before the app"
+[[ -e "$fixture_root/dylib-sign-called" ]] || fail "Debug dylib was not signed before the app"
+[[ "$(/usr/bin/grep -Fc '/Contents/Frameworks/Fixture.framework' "$tool_log")" == 1 ]] || fail "Framework fixture was signed more than once"
+[[ "$(/usr/bin/grep -Fc '/Contents/MacOS/CrispVoice.debug.dylib' "$tool_log")" == 1 ]] || fail "Debug dylib was signed more than once"
 /usr/bin/grep -Fq "$fixture_root/.build/DerivedData" "$tool_log" || fail "local DerivedData path not used"
 /usr/bin/grep -Fq "$fixture_root/DevBuild/CrispVoice.app" "$output_log" || fail "stable app path not printed"
 ! /usr/bin/grep -Fq "$HOME/Library/Developer/Xcode/DerivedData" "$tool_log" || fail "global DerivedData was used"
 
-for scenario in no_identity multiple_identities build_failure copy_failure nested_sign_failure sign_failure strict_verification_failure adhoc_signature wrong_bundle_id wrong_certificate; do
+for scenario in no_identity multiple_identities build_failure copy_failure nested_sign_failure dylib_sign_failure sign_failure strict_verification_failure adhoc_signature wrong_bundle_id wrong_certificate; do
   if run_launcher "$scenario"; then fail "$scenario unexpectedly succeeded"; fi
   [[ "$(cat "$fixture_root/DevBuild/CrispVoice.app/marker")" == prior ]] || fail "$scenario changed prior app"
   ! /usr/bin/grep -Fq 'killall ' "$tool_log" || fail "$scenario killed a running app"
