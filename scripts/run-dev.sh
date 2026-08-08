@@ -35,6 +35,7 @@ SOURCE_APP="$DERIVED_DATA/Build/Products/Debug/$APP_NAME"
 STABLE_DIR="$ROOT_DIR/DevBuild"
 STABLE_APP="$STABLE_DIR/$APP_NAME"
 EXPECTED_EXECUTABLE="$STABLE_APP/Contents/MacOS/CrispVoice"
+ENTITLEMENTS_PATH="$ROOT_DIR/Sources/CrispVoice/App/CrispVoice.entitlements"
 
 if [[ "$test_mode" == "1" ]]; then
   XCODEGEN_BIN="$TOOL_DIR/xcodegen"
@@ -79,6 +80,8 @@ for required_tool in "$XCODEGEN_BIN" "$XCODEBUILD_BIN" "$SECURITY_BIN" "$CODESIG
 done
 
 [[ -d "$ROOT_DIR" && ! -L "$ROOT_DIR" ]] || cv_dev_die "Repository root must be a real directory"
+[[ -f "$ENTITLEMENTS_PATH" && ! -L "$ENTITLEMENTS_PATH" ]] \
+  || cv_dev_die "Audio Input entitlement file is missing or invalid."
 
 staging_dir=""
 backup_dir=""
@@ -146,9 +149,15 @@ staging_dir="$("$MKTEMP_BIN" -d "$STABLE_DIR/.CrispVoice-stage.XXXXXX")"
 staged_app="$staging_dir/$APP_NAME"
 "$DITTO_BIN" "$SOURCE_APP" "$staged_app"
 [[ -d "$staged_app" && ! -L "$staged_app" ]] || cv_dev_die "Staged app must be a real directory"
-"$CODESIGN_BIN" --force --deep --sign "$selected_sha1" "$staged_app"
+"$CODESIGN_BIN" \
+  --force \
+  --deep \
+  --sign "$selected_sha1" \
+  --options runtime \
+  --entitlements "$ENTITLEMENTS_PATH" \
+  "$staged_app"
 cv_dev_require_bundle "$staged_app" "$BUNDLE_ID" "$PLUTIL_BIN" >/dev/null
-cv_dev_require_signing "$staged_app" "$selected_sha1" "$CODESIGN_BIN" "$SHASUM_BIN"
+cv_dev_require_signing "$staged_app" "$selected_sha1" "$CODESIGN_BIN" "$SHASUM_BIN" "$PLUTIL_BIN"
 
 current_uid="$("$ID_BIN" -u)"
 running_pids=""

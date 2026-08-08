@@ -40,6 +40,9 @@ fi
 
 DIST_DIR="$ROOT_DIR/dist"
 cv_require_real_directory_or_absent "$DIST_DIR"
+ENTITLEMENTS_PATH="$ROOT_DIR/Sources/CrispVoice/App/CrispVoice.entitlements"
+[[ -f "$ENTITLEMENTS_PATH" && ! -L "$ENTITLEMENTS_PATH" ]] \
+  || cv_die "Audio Input entitlement file is missing or invalid."
 
 "$ROOT_DIR/scripts/check-release-signing.sh" --require-private-key
 
@@ -104,12 +107,11 @@ while IFS= read -r candidate; do
     "$candidate"
 done < "$nested_candidates"
 
-/usr/bin/codesign \
-  --force \
-  --sign "$CRISPVOICE_SIGNING_IDENTITY_SHA1" \
-  --options runtime \
-  --timestamp=none \
-  --requirements "=designated => certificate leaf = H\"$CRISPVOICE_SIGNING_IDENTITY_SHA1\" and identifier \"$CRISPVOICE_BUNDLE_ID\"" \
+cv_sign_release_app \
+  /usr/bin/codesign \
+  "$CRISPVOICE_SIGNING_IDENTITY_SHA1" \
+  "$ENTITLEMENTS_PATH" \
+  "=designated => certificate leaf = H\"$CRISPVOICE_SIGNING_IDENTITY_SHA1\" and identifier \"$CRISPVOICE_BUNDLE_ID\"" \
   "$APP_PATH"
 
 "$ROOT_DIR/scripts/verify-release-app.sh" "$APP_PATH" "$VERSION"

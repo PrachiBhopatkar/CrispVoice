@@ -43,6 +43,11 @@ expect_failure cv_dev_require_launched_path "$expected" "$expected --unexpected-
 fake_plutil="$fixture/plutil"
 cat > "$fake_plutil" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == -extract && "$2" == 'com\.apple\.security\.device\.audio-input' && "$3" == raw && "$4" == -expect && "$5" == bool && "$6" == -o && "$7" == - && $# -eq 8 ]]; then
+  [[ "${CV_TEST_SIGNING_SCENARIO:-success}" != missing_audio_input ]] || exit 97
+  printf '%s\n' true
+  exit 0
+fi
 [[ "$1" == -extract && "$3" == raw && "$4" == -o && "$5" == - && $# -eq 6 ]] || exit 99
 case "$2" in
   CFBundleIdentifier)
@@ -77,7 +82,27 @@ cat > "$fake_codesign" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == --verify && "$2" == --deep && "$3" == --strict && "$4" == "$CV_TEST_EXPECTED_APP" && $# -eq 4 ]]; then exit 0; fi
 if [[ "$1" == --display && "$2" == --verbose=4 && "$3" == --requirements && "$4" == - && "$5" == "$CV_TEST_EXPECTED_APP" && $# -eq 5 ]]; then
-  printf '%s\n' 'Signature size=4797' 'TeamIdentifier=TEAM123456' 'designated => identifier "com.crispvoice.app" and anchor apple generic'
+  case "${CV_TEST_SIGNING_SCENARIO:-success}" in
+    success|missing_audio_input)
+      printf '%s\n' 'Signature size=4797' 'flags=0x10000(runtime)' 'TeamIdentifier=TEAM123456' 'designated => identifier "com.crispvoice.app" and anchor apple generic'
+      ;;
+    missing_runtime)
+      printf '%s\n' 'Signature size=4797' 'flags=0x0(none)' 'TeamIdentifier=TEAM123456' 'designated => identifier "com.crispvoice.app" and anchor apple generic'
+      ;;
+    *) exit 96 ;;
+  esac
+  exit 0
+fi
+if [[ "$1" == --display && "$2" == --entitlements && "$3" == */entitlements.plist && "$4" == --xml && "$5" == "$CV_TEST_EXPECTED_APP" && $# -eq 5 ]]; then
+  case "${CV_TEST_SIGNING_SCENARIO:-success}" in
+    success|missing_runtime)
+      printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<plist version="1.0"><dict><key>com.apple.security.device.audio-input</key><true/></dict></plist>' > "$3"
+      ;;
+    missing_audio_input)
+      printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<plist version="1.0"><dict/></plist>' > "$3"
+      ;;
+    *) exit 95 ;;
+  esac
   exit 0
 fi
 if [[ "$1" == --display && "$2" == --extract-certificates=* && "${2#--extract-certificates=}" == */cert && "$3" == "$CV_TEST_EXPECTED_APP" && $# -eq 3 ]]; then
@@ -95,8 +120,16 @@ else
 fi
 EOF
 chmod +x "$fake_codesign" "$fake_shasum"
-expect_success cv_dev_require_signing "$fixture/Expected.app" 151F66C8B0F20E6B0682394EEF7A3084495B50F1 "$fake_codesign" "$fake_shasum"
-if signing_error="$(CV_TEST_CERT_SHA1=wrong cv_dev_require_signing "$fixture/Expected.app" 151F66C8B0F20E6B0682394EEF7A3084495B50F1 "$fake_codesign" "$fake_shasum" 2>&1)"; then
+expect_success cv_dev_require_signing "$fixture/Expected.app" 151F66C8B0F20E6B0682394EEF7A3084495B50F1 "$fake_codesign" "$fake_shasum" "$fake_plutil"
+if signing_error="$(CV_TEST_SIGNING_SCENARIO=missing_runtime cv_dev_require_signing "$fixture/Expected.app" 151F66C8B0F20E6B0682394EEF7A3084495B50F1 "$fake_codesign" "$fake_shasum" "$fake_plutil" 2>&1)"; then
+  fail "missing runtime unexpectedly succeeded"
+fi
+[[ "$signing_error" == *'Hardened Runtime'* ]] || fail "missing runtime error"
+if signing_error="$(CV_TEST_SIGNING_SCENARIO=missing_audio_input cv_dev_require_signing "$fixture/Expected.app" 151F66C8B0F20E6B0682394EEF7A3084495B50F1 "$fake_codesign" "$fake_shasum" "$fake_plutil" 2>&1)"; then
+  fail "missing Audio Input entitlement unexpectedly succeeded"
+fi
+[[ "$signing_error" == *'Audio Input entitlement'* ]] || fail "missing Audio Input entitlement error"
+if signing_error="$(CV_TEST_CERT_SHA1=wrong cv_dev_require_signing "$fixture/Expected.app" 151F66C8B0F20E6B0682394EEF7A3084495B50F1 "$fake_codesign" "$fake_shasum" "$fake_plutil" 2>&1)"; then
   fail "certificate mismatch unexpectedly succeeded"
 fi
 [[ "$signing_error" == *'Signing certificate fingerprint did not match selected Apple Development identity'* ]] \

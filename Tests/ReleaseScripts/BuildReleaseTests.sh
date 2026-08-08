@@ -15,12 +15,16 @@ fail() {
 make_release_fixture() {
   local fixture_root="$1"
 
-  /bin/mkdir -p "$fixture_root/scripts" "$fixture_root/release"
+  /bin/mkdir -p "$fixture_root/scripts" "$fixture_root/release" "$fixture_root/Sources/CrispVoice/App"
   /bin/cp "$ROOT_DIR/scripts/build-release.sh" "$fixture_root/scripts/build-release.sh"
   /bin/cp "$ROOT_DIR/scripts/release-lib.sh" "$fixture_root/scripts/release-lib.sh"
   /bin/cp "$ROOT_DIR/release/config.sh" "$fixture_root/release/config.sh"
   /bin/cp "$ROOT_DIR/release/CrispVoice-Early-Access-Release.cer" \
     "$fixture_root/release/CrispVoice-Early-Access-Release.cer"
+  if [[ -f "$ROOT_DIR/Sources/CrispVoice/App/CrispVoice.entitlements" ]]; then
+    /bin/cp "$ROOT_DIR/Sources/CrispVoice/App/CrispVoice.entitlements" \
+      "$fixture_root/Sources/CrispVoice/App/CrispVoice.entitlements"
+  fi
 }
 
 test_failing_git_status_stops_production_release() {
@@ -161,6 +165,35 @@ test_symlinked_dist_stops_before_preflight() {
     || fail "signing preflight ran with a symlinked dist"
   [[ "$(/bin/cat "$protected_archive")" == 'prior-good-artifact' ]] \
     || fail "symlinked dist changed the protected artifact"
+}
+
+test_missing_audio_input_entitlement_stops_before_preflight() {
+  local fixture_root="$TEST_TEMP/missing-audio-input-entitlement"
+  local preflight_marker="$fixture_root/preflight-reached"
+  local output
+  local status
+
+  make_release_fixture "$fixture_root"
+  /bin/rm -f "$fixture_root/Sources/CrispVoice/App/CrispVoice.entitlements"
+
+  /bin/echo '#!/usr/bin/env bash' > "$fixture_root/scripts/check-release-signing.sh"
+  /bin/echo ': > "$TEST_PREFLIGHT_MARKER"' >> "$fixture_root/scripts/check-release-signing.sh"
+  /bin/echo 'exit 97' >> "$fixture_root/scripts/check-release-signing.sh"
+  /bin/chmod +x "$fixture_root/scripts/check-release-signing.sh"
+
+  set +e
+  output="$(
+    TEST_PREFLIGHT_MARKER="$preflight_marker" \
+      /bin/bash "$fixture_root/scripts/build-release.sh" --development 0.2.2 2>&1
+  )"
+  status=$?
+  set -e
+
+  [[ "$status" -ne 0 ]] || fail "missing Audio Input entitlement unexpectedly succeeded"
+  [[ "$output" == *"Audio Input entitlement file is missing or invalid."* ]] \
+    || fail "missing Audio Input entitlement did not report the expected error: $output"
+  [[ ! -e "$preflight_marker" ]] \
+    || fail "signing preflight ran after the Audio Input entitlement check failed"
 }
 
 test_final_artifact_symlinks_are_rejected_without_outside_mutation() {
@@ -335,6 +368,7 @@ test_failing_git_status_stops_production_release
 test_failing_commit_resolution_stops_production_release
 test_symlink_validator_returns_failure_when_status_is_handled
 test_symlinked_dist_stops_before_preflight
+test_missing_audio_input_entitlement_stops_before_preflight
 test_final_artifact_symlinks_are_rejected_without_outside_mutation
 test_rejected_packaged_candidate_preserves_published_artifacts
 test_second_publish_failure_restores_prior_artifact_pair

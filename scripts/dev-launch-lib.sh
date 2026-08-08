@@ -66,10 +66,13 @@ cv_dev_require_signing() {
   local expected_sha1="$2"
   local codesign_bin="$3"
   local shasum_bin="$4"
+  local plutil_bin="$5"
   local signing_text
   local temporary_dir
   local certificate_sha1
+  local audio_input
   local status=0
+  local entitlement_status=0
 
   [[ "$expected_sha1" =~ ^[0-9A-F]{40}$ ]] \
     || cv_dev_die "Invalid selected signing fingerprint" || return 1
@@ -79,6 +82,8 @@ cv_dev_require_signing() {
     || cv_dev_die "Could not inspect code signature: $app_path" || return 1
   cv_dev_require_stable_signing_text "$signing_text" \
     || cv_dev_die "Code signature is not certificate-backed and stable: $app_path" || return 1
+  printf '%s\n' "$signing_text" | /usr/bin/grep -Fq 'flags=0x10000(runtime)' \
+    || cv_dev_die "Stable development signature is missing Hardened Runtime" || return 1
   temporary_dir="$(/usr/bin/mktemp -d -t crispvoice-dev-signing)" \
     || cv_dev_die "Could not create certificate inspection directory" || return 1
   "$codesign_bin" --display --extract-certificates="$temporary_dir/cert" "$app_path" >/dev/null 2>&1 || status=$?
@@ -91,7 +96,25 @@ cv_dev_require_signing() {
   if [[ "$status" -eq 0 && "$certificate_sha1" != "$expected_sha1" ]]; then
     status=1
   fi
+  if [[ "$status" -eq 0 ]]; then
+    "$codesign_bin" --display --entitlements "$temporary_dir/entitlements.plist" --xml "$app_path" >/dev/null 2>&1 \
+      || { status=$?; entitlement_status=1; }
+  fi
+  if [[ "$status" -eq 0 ]]; then
+    audio_input="$("$plutil_bin" \
+      -extract 'com\.apple\.security\.device\.audio-input' raw \
+      -expect bool -o - "$temporary_dir/entitlements.plist" 2>/dev/null)" \
+      || { status=$?; entitlement_status=1; }
+  fi
+  if [[ "$status" -eq 0 && "$audio_input" != true ]]; then
+    status=1
+    entitlement_status=1
+  fi
   /bin/rm -rf "$temporary_dir"
+  if [[ "$entitlement_status" -ne 0 ]]; then
+    cv_dev_die "Stable development signature is missing the Audio Input entitlement"
+    return 1
+  fi
   [[ "$status" -eq 0 ]] \
     || cv_dev_die "Signing certificate fingerprint did not match selected Apple Development identity" || return 1
 }

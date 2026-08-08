@@ -8,6 +8,17 @@ fake_tools="$fixture_root/tools"
 tool_log="$fixture_root/tools.log"
 output_log="$fixture_root/output.log"
 /bin/mkdir -p "$fake_tools"
+/bin/mkdir -p "$fixture_root/Sources/CrispVoice/App"
+cat > "$fixture_root/Sources/CrispVoice/App/CrispVoice.entitlements" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>
+EOF
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -41,6 +52,10 @@ case "$tool" in
     /usr/bin/touch "$derived/Build/Products/Debug/CrispVoice.app/Contents/MacOS/CrispVoice"
     ;;
   plutil)
+    if [[ "$1" == -extract && "$2" == 'com\.apple\.security\.device\.audio-input' && "$3" == raw && "$4" == -expect && "$5" == bool && "$6" == -o && "$7" == - && $# -eq 8 ]]; then
+      printf '%s\n' true
+      exit 0
+    fi
     [[ "$1" == -extract && "$3" == raw && "$4" == -o && "$5" == - && $# -eq 6 ]] || exit 99
     case "$2" in
       CFBundleIdentifier) [[ "$scenario" == wrong_bundle_id ]] && printf '%s\n' com.example.wrong || printf '%s\n' com.crispvoice.app ;;
@@ -62,15 +77,19 @@ case "$tool" in
       if [[ "$scenario" == adhoc_signature ]]; then
         printf '%s\n' 'Signature=adhoc' 'TeamIdentifier=not set' 'designated => cdhash H"1234"'
       else
-        printf '%s\n' 'Signature size=4797' 'TeamIdentifier=TEAMTEST123' 'designated => identifier "com.crispvoice.app" and anchor apple generic'
+        printf '%s\n' 'Signature size=4797' 'flags=0x10000(runtime)' 'TeamIdentifier=TEAMTEST123' 'designated => identifier "com.crispvoice.app" and anchor apple generic'
       fi
+      exit 0
+    fi
+    if [[ "$1" == --display && "$2" == --entitlements && "$3" == */entitlements.plist && "$4" == --xml && "$5" == "$staged_app"*"/CrispVoice.app" && $# -eq 5 ]]; then
+      printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<plist version="1.0"><dict><key>com.apple.security.device.audio-input</key><true/></dict></plist>' > "$3"
       exit 0
     fi
     if [[ "$1" == --display && "$2" == --extract-certificates=* && "${2#--extract-certificates=}" == */cert && "$3" == "$staged_app"*"/CrispVoice.app" && $# -eq 3 ]]; then
       /usr/bin/touch "${2#--extract-certificates=}"0
       exit 0
     fi
-    if [[ "$1" == --force && "$2" == --deep && "$3" == --sign && "$4" == AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA && "$5" == "$staged_app"*"/CrispVoice.app" && $# -eq 5 ]]; then
+    if [[ "$1" == --force && "$2" == --deep && "$3" == --sign && "$4" == AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA && "$5" == --options && "$6" == runtime && "$7" == --entitlements && "$8" == "$CV_TEST_FIXTURE_ROOT/Sources/CrispVoice/App/CrispVoice.entitlements" && "$9" == "$staged_app"*"/CrispVoice.app" && $# -eq 9 ]]; then
       [[ "$scenario" != sign_failure ]] || exit 1
       exit 0
     fi

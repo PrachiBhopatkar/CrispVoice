@@ -28,6 +28,28 @@ cv_certificate_sha256() {
   /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print toupper($1)}'
 }
 
+cv_sign_release_app() {
+  local codesign_bin="$1"
+  local identity="$2"
+  local entitlements="$3"
+  local requirement="$4"
+  local app_path="$5"
+
+  [[ -f "$entitlements" && ! -L "$entitlements" ]] || {
+    cv_die "Audio Input entitlement file is missing or invalid."
+    return 1
+  }
+
+  "$codesign_bin" \
+    --force \
+    --sign "$identity" \
+    --options runtime \
+    --timestamp=none \
+    --entitlements "$entitlements" \
+    --requirements "$requirement" \
+    "$app_path"
+}
+
 cv_require_real_directory_or_absent() {
   local path="${1:-}"
 
