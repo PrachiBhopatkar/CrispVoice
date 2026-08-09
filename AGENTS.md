@@ -15,8 +15,8 @@ The plan is the authoritative, ordered task list (Phases 0–3 = the MVP). Imple
 
 ## Hard invariants (never violate)
 
-1. **No developer backend, ever.** The only outbound network call the app makes is to `api.anthropic.com`, with the user's own key. No telemetry, analytics, or logging that contains audio, transcripts, or message text.
-2. **Privacy:** audio and transcripts never leave the device. Transcription is fully local (whisper.cpp).
+1. **No developer backend, ever.** The only content-bearing runtime request is the rewrite to the **user-selected Anthropic or Amazon Bedrock rewrite destination**: Anthropic content goes directly to `api.anthropic.com` with the user's key; Bedrock content goes directly to the configured Bedrock Runtime endpoint with the user's AWS identity. Standard AWS profile authentication may contact AWS SSO/OIDC/STS endpoints or invoke an administrator-configured local `credential_process`; this non-content traffic is outside CrispVoice's control, and CrispVoice never sends transcript or rewrite content to that process. CrispVoice has no developer backend, proxy, telemetry, or content-bearing logging.
+2. **Privacy:** Audio never leaves the device, and Transcription remains local (whisper.cpp). AWS credentials are never stored by CrispVoice; the Anthropic key is Keychain-only in Phase 3 or a dev env var before that.
 3. **Do NOT enable the App Sandbox.** The app needs Accessibility (keystroke synthesis) and direct distribution.
 4. **Never commit secrets or large binaries.** The Anthropic key lives only in the macOS Keychain (Phase 3) or a dev env var before that — never in source. `.gitignore` already excludes `*.bin`, `*.gguf`, `.env`, `*.key`, `Models/`, and build output. Respect it.
 5. **One commit per completed task**, using the commit message given in the plan's final step for that task.
@@ -102,4 +102,4 @@ The plan pins specific third-party APIs (SwiftWhisper's `transcribe(audioFrames:
 
 ## When the MVP is complete
 
-After Phase 3 passes, run the full suite, do the privacy smoke test (Task 3.6 — confirm the only outbound connection is `api.anthropic.com`), then push and tag `v0.1.0-mvp`. Phases 4 (notarized public release) and 5 (managed/marketplace) are out of scope here and will get their own plans.
+After Phase 3 passes, run the full suite, do the privacy smoke test (Task 3.6 — confirm content-bearing traffic goes directly only to the selected Anthropic or Bedrock provider endpoint, while AWS authentication traffic is non-content), then push and tag `v0.1.0-mvp`. Phases 4 (notarized public release) and 5 (managed/marketplace) are out of scope here and will get their own plans.

@@ -33,7 +33,7 @@ These were discovered during brainstorming and are load-bearing:
 2. **Every in-Slack surface requires the app to be installed in that workspace** — slash commands, message actions, ephemeral messages, Block Kit buttons all need a workspace install, which is exactly what a company admin gates.
 3. **The author cannot rely on company-admin approval.** Therefore the product must work **without installing anything into the company's Slack workspace.**
 4. **The author uses the Slack desktop app** (Electron), not Slack in a browser — so a browser extension cannot reach it.
-5. **Privacy is a hard requirement.** The developer's app must never receive the user's audio or transcribed text. Everything stays on the user's machine except the rewrite request the user chooses to send to their *own* Claude.
+5. **Privacy is a hard requirement.** The developer's app must never receive the user's audio or transcribed text. Everything stays on the user's machine except the rewrite request the user chooses to send to their **user-selected Anthropic or Amazon Bedrock rewrite destination**.
 
 The only architecture satisfying all of these is a **client-side macOS companion** that operates at the UI layer (like Grammarly's desktop app), not the Slack API layer, with **on-device transcription** and **no developer backend**. Slack never knows CrispVoice exists, and neither does the developer's infrastructure.
 
@@ -51,8 +51,8 @@ A native macOS **menu-bar app**. No server, no Slack API, no OAuth, and **no dev
 [Apple Speech live STT]  (on device)        ← live transcript while speaking
       │  transcribed text — never leaves the Mac
       ▼
-[Crisp engine]  ──HTTPS, user's own API key──▶  [Anthropic API / Claude]
-      │  (request goes user's machine → Anthropic directly; no developer server in the path)
+[Crisp engine]  ──HTTPS, selected provider identity──▶  [Anthropic API / Claude or AWS Bedrock Runtime]
+      │  (request goes directly to the selected provider; no developer server in the path)
       │  crisp draft + tone variants
       ▼
 [Suggestion panel over the thread]  ── user picks / edits ──▶
@@ -69,7 +69,7 @@ A native macOS **menu-bar app**. No server, no Slack API, no OAuth, and **no dev
 1. User presses the **global hotkey**. A small CrispVoice panel opens over the active thread and **audio recording starts** (the app captures the mic directly — no dependency on macOS system Dictation).
 2. User dictates a rough reply; presses the hotkey again (or a stop key) to finish.
 3. **Apple Speech transcribes the audio locally**, on-device, to text and streams partial results into the panel while the user is still speaking. No network call is allowed for transcription.
-4. CrispVoice sends that text to **Claude** (via the user's own API key, direct from the user's machine) to (a) clean up any residual errors and (b) rewrite it concisely, returning a crisp draft plus tone options.
+4. CrispVoice sends that text to the selected rewrite provider: **Claude** directly through the user's own Anthropic API key, or **Amazon Bedrock Runtime** directly through the user's AWS identity. The provider cleans up residual errors and rewrites concisely, returning a crisp draft plus tone options.
 5. User picks a variant (`Shorter · Direct · Warmer · Regenerate`) or quick-edits inline.
 6. CrispVoice **pastes the chosen text into the Slack compose box**.
 7. User presses **Enter** → the message posts **as themselves**, natively.
@@ -84,7 +84,7 @@ A native macOS **menu-bar app**. No server, no Slack API, no OAuth, and **no dev
 | **Hotkey manager** | Registers a configurable global hotkey; starts/stops capture. | |
 | **Audio capture** | Records mic audio to an in-memory/local buffer while recording. | Requests macOS Microphone permission. Audio never leaves the device. |
 | **Local STT (Apple Speech)** | Transcribes the captured audio on-device to text and supports live partial updates. | Requires on-device Apple Speech support on the user's Mac; if unavailable, CrispVoice fails explicitly rather than using a cloud speech path. |
-| **Crisp engine** | Sends transcribed text to Claude with a tuned prompt; parses crisp draft + variants. | Uses the user's own key, direct to Anthropic. Provider-pluggable internally. |
+| **Crisp engine** | Sends transcribed text to the selected rewrite provider with a tuned prompt; parses crisp draft + variants. | Anthropic uses the user's own key directly; Bedrock uses the user's AWS identity directly. |
 | **Suggestion panel** | Renders crisp variants + tone buttons; supports inline edit. | The visible "see all options right there" surface. |
 | **Inserter** | Pastes chosen text into the focused field via Accessibility + clipboard (save/restore clipboard). | The de-risked core capability (Phase 0). |
 | **Settings / Keychain store** | Stores the Anthropic API key in macOS Keychain; stores hotkey and tone prefs. | Never hardcode keys. |
@@ -94,7 +94,7 @@ A native macOS **menu-bar app**. No server, no Slack API, no OAuth, and **no dev
 
 - **Native Swift** for the app — cleanest path for menu-bar, global hotkey, Accessibility, mic capture, and floating panels.
 - **Apple Speech** (`Speech.framework`) for on-device live transcription with partial results.
-- **Anthropic API (Claude)** as the crisp engine — called directly from the user's machine with the user's own key. The crisp engine is written so another provider could be added later, but v1 ships Claude only.
+- **Anthropic API (Claude) or Amazon Bedrock Runtime** as the user-selected rewrite provider — each is called directly from the user's machine with the user's own identity. No developer-controlled service is in the path.
 - **Tauri** is a documented fallback if web-tech is strongly preferred, but it complicates Accessibility/hotkey/mic work and is **not** recommended.
 
 ## 7. Transcription decision (Apple Speech)
@@ -107,20 +107,20 @@ A native macOS **menu-bar app**. No server, no Slack API, no OAuth, and **no dev
 
 Privacy is a first-class requirement, satisfied *by construction* because there is **no developer backend**:
 
-- **Audio** is captured on the user's Mac and **never leaves it**.
-- **Transcription** runs **on-device via Apple Speech** — no network call is allowed for transcription, so the developer never receives the text.
-- **The crisp rewrite** is the *only* network call. It goes **directly from the user's machine to Anthropic, authenticated with the user's own API key** — it does **not** pass through any developer server (none exists). This is identical to the user using Claude directly, which their company already permits.
-- **The developer (Prachi) never sees, stores, logs, or proxies** any user audio, transcript, message text, or API key.
-- **No content-bearing telemetry, ever.** If anonymous crash/usage metrics are added later, they must exclude all message content. Principle: *nothing leaves the device except the user-initiated Claude call.*
-- **Honest caveat:** Anthropic does receive the text being rewritten (unavoidable when Claude does the rewriting), but only under the user's own key, direct from their machine. Anthropic's API does not train on API inputs and has limited/zero retention.
+- **Audio** is captured on the user's Mac and **never leaves it**. **Transcription** remains local through on-device Apple Speech; no network call is allowed for transcription.
+- **The crisp rewrite** is the only content-bearing runtime request and goes to the **user-selected Anthropic or Amazon Bedrock rewrite destination**: Anthropic content goes directly from the user's machine to `api.anthropic.com` with the user's own API key; Bedrock content goes directly to the configured Bedrock Runtime endpoint with the user's AWS identity.
+- Standard AWS profile authentication may contact **AWS SSO/OIDC/STS endpoints** or invoke an administrator-configured local **`credential_process`**. This is non-content traffic. CrispVoice neither controls nor guarantees that external credential process's own network destinations, storage, or logging behavior, and it never sends transcript or rewrite content to that process.
+- CrispVoice has **no developer backend, proxy, telemetry, or content-bearing logging**. The developer never sees, stores, logs, or proxies user audio, transcripts, prompts, responses, message text, API keys, AWS credentials, or raw credential-provider output.
+- **AWS credentials are never stored by CrispVoice.** The Anthropic API key remains in the user's macOS Keychain; Bedrock uses the user's existing AWS identity and standard profile configuration.
+- **Honest caveat:** The selected provider receives the text being rewritten: Anthropic receives it under the user's own key, while Bedrock receives it under the user's AWS identity and its configured endpoint/profile. No developer-controlled service is in either path.
 - **Future option (out of scope for v1):** a fully-offline mode that uses a *local* LLM for the rewrite too, so even the crisp step never touches the network.
 
-This posture is also a **selling point**: "CrispVoice has no servers; your audio and transcripts never leave your Mac; the only thing sent is the text you choose to crisp, to your own Anthropic key."
+This posture is also a **selling point**: "CrispVoice has no servers; your audio and transcripts never leave your Mac; the only thing sent is the text you choose to crisp, directly to your selected Anthropic or Amazon Bedrock provider."
 
 ## 9. Distribution model (BYOK)
 
-- **Bring Your Own Key.** Users download the app, open Settings, and paste **their own Anthropic API key**, stored in their macOS Keychain. The app calls Claude directly with it. This remains the **only** user-managed key.
-- Keys stay on each user's machine. The author **never sees, stores, or proxies** anyone's key or traffic. Each user is billed by Anthropic for their own usage — **zero cost and zero liability** to the author.
+- **Bring Your Own Key or AWS identity.** Users may paste **their own Anthropic API key**, stored in their macOS Keychain, or choose Amazon Bedrock with an existing standard AWS profile. CrispVoice never stores AWS credentials or asks users to paste them.
+- Anthropic keys and AWS credentials stay under each user's control. The author **never sees, stores, or proxies** anyone's key, credential, or traffic. Anthropic users are billed for their own API usage; Bedrock usage is governed by the user's AWS account — **zero cost and zero liability** to the author.
 - **Channel:** direct download (notarized DMG / GitHub Releases). **Not** the Mac App Store — App Store sandboxing forbids the Accessibility access CrispVoice requires (the same reason Grammarly's desktop app is a direct download).
 
 ### Apple Developer Program
@@ -165,5 +165,5 @@ This posture is also a **selling point**: "CrispVoice has no servers; your audio
 - From any Slack thread/DM/channel in the **company workspace**, the author can press one hotkey, dictate, pick a crisp version, and send it **as themselves** in under ~10 seconds, without leaving the conversation or touching an admin.
 - Transcription appears live while the user is speaking and is accurate enough that the crisp output reliably reflects intent.
 - The crisp output is consistently more concise and clearer than the raw dictation.
-- **Privacy holds:** audio and transcripts never leave the device; the only outbound network call is the user's own Claude request; no developer backend is contacted at any point.
+- **Privacy holds:** audio and transcripts never leave the device; the only content-bearing request is sent directly to the user-selected Anthropic or Amazon Bedrock provider; AWS authentication traffic is non-content only; no developer backend is contacted at any point.
 - No Slack app is installed anywhere; no API key is hardcoded by the time Phase 3 ships.
