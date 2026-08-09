@@ -4,7 +4,7 @@ You are implementing **CrispVoice**, a native macOS menu-bar app. Read this file
 
 ## What you're building (one paragraph)
 
-On a global hotkey, the app records the mic, transcribes **on-device** with `whisper.cpp` (via SwiftWhisper), rewrites the text into a crisp Slack message using the user's **own** Anthropic API key, and pastes the result into the focused Slack compose box (clipboard + synthesized ⌘V) so it posts **as the user**. No Slack app, no developer backend.
+On a global hotkey, the app records the mic, transcribes **on-device** with `whisper.cpp` (via SwiftWhisper), rewrites the text into a crisp Slack message through the user's selected Anthropic or Amazon Bedrock provider, and pastes the result into the focused Slack compose box (clipboard + synthesized ⌘V) so it posts **as the user**. No Slack app, no developer backend.
 
 ## Source of truth
 
@@ -15,7 +15,7 @@ The plan is the authoritative, ordered task list (Phases 0–3 = the MVP). Imple
 
 ## Hard invariants (never violate)
 
-1. **No developer backend, ever.** The only content-bearing runtime request is the rewrite to the **user-selected Anthropic or Amazon Bedrock rewrite destination**: Anthropic content goes directly to `api.anthropic.com` with the user's key; Bedrock content goes directly to the configured Bedrock Runtime endpoint with the user's AWS identity. Standard AWS profile authentication may contact AWS SSO/OIDC/STS endpoints or invoke an administrator-configured local `credential_process`; this non-content traffic is outside CrispVoice's control, and CrispVoice never sends transcript or rewrite content to that process. CrispVoice has no developer backend, proxy, telemetry, or content-bearing logging.
+1. **No developer backend, ever.** The only content-bearing runtime request is the rewrite to the **user-selected Anthropic or Amazon Bedrock rewrite destination**: Anthropic content goes directly to `api.anthropic.com` with the user's key; Bedrock content goes directly to the configured Bedrock Runtime endpoint with the user's AWS identity. When Bedrock is selected, standard AWS profile authentication may contact AWS SSO/OIDC/STS endpoints or invoke an administrator-configured local `credential_process`; this non-content authentication traffic is initiated only for the explicitly selected standard AWS profile/provider. The credential process is outside CrispVoice's control, and CrispVoice never sends transcript or rewrite content to it. CrispVoice has no developer backend, proxy, telemetry, analytics, or content-bearing logging.
 2. **Privacy:** Audio never leaves the device, and Transcription remains local (whisper.cpp). AWS credentials are never stored by CrispVoice; the Anthropic key is Keychain-only in Phase 3 or a dev env var before that.
 3. **Do NOT enable the App Sandbox.** The app needs Accessibility (keystroke synthesis) and direct distribution.
 4. **Never commit secrets or large binaries.** The Anthropic key lives only in the macOS Keychain (Phase 3) or a dev env var before that — never in source. `.gitignore` already excludes `*.bin`, `*.gguf`, `.env`, `*.key`, `Models/`, and build output. Respect it.

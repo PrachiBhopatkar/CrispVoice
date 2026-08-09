@@ -12,18 +12,18 @@ A macOS menu-bar companion that turns rough, dictated speech into a crisp, conci
 
 ## Architecture update — 2026-06-23
 
-The original v1 plan chose `whisper.cpp` for on-device transcription. After implementation and live testing, that path did not meet the product's latency target for Apple-Dictation-like responsiveness. CrispVoice now uses **Apple Speech** for the live transcript path and requires **on-device Apple Speech support** at runtime; if on-device recognition is unavailable, the app fails explicitly instead of falling back to a network-backed speech path. Claude remains the post-stop rewrite engine, called directly with the user's own API key.
+The original v1 plan chose `whisper.cpp` for on-device transcription. After implementation and live testing, that path did not meet the product's latency target for Apple-Dictation-like responsiveness. CrispVoice now uses **Apple Speech** for the live transcript path and requires **on-device Apple Speech support** at runtime; if on-device recognition is unavailable, the app fails explicitly instead of falling back to a network-backed speech path. The post-stop rewrite uses the user's selected Anthropic or Amazon Bedrock provider, called directly with the user's own provider identity.
 
 ## 2. Problem & value proposition
 
 Writing good Slack messages is slow, and most dictation tools mangle accented speech. The value of CrispVoice is **usability, speed, and message quality**: read a message, invoke CrispVoice right where you are, dictate a rough reply, and send a polished version on the spot — without leaving the conversation, copying across windows, or depending on anyone's IT admin.
 
-The differentiator is the pairing of **live on-device transcription** (so words appear while you speak) with a **crisp rewrite** (so the message is concise and well-written). Transcription happens locally on the user's machine; the rewrite is done by the user's own Claude.
+The differentiator is the pairing of **live on-device transcription** (so words appear while you speak) with a **crisp rewrite** (so the message is concise and well-written). Transcription happens locally on the user's machine; the rewrite is done directly through the user's selected Anthropic or Amazon Bedrock provider.
 
 ## 3. Target users
 
 - **Primary (v1):** The author — a PM who sends many Slack messages daily, often in a **company workspace where they are not an admin** and cannot get apps approved.
-- **Secondary (public BYOK release):** Other individuals (PMs, engineers, early adopters) who download the app and supply their own Anthropic API key.
+- **Secondary (public release):** Other individuals (PMs, engineers, early adopters) who download the app and use their own Anthropic API key or existing AWS identity.
 
 ## 4. Key constraints that shaped the design
 
@@ -109,8 +109,8 @@ Privacy is a first-class requirement, satisfied *by construction* because there 
 
 - **Audio** is captured on the user's Mac and **never leaves it**. **Transcription** remains local through on-device Apple Speech; no network call is allowed for transcription.
 - **The crisp rewrite** is the only content-bearing runtime request and goes to the **user-selected Anthropic or Amazon Bedrock rewrite destination**: Anthropic content goes directly from the user's machine to `api.anthropic.com` with the user's own API key; Bedrock content goes directly to the configured Bedrock Runtime endpoint with the user's AWS identity.
-- Standard AWS profile authentication may contact **AWS SSO/OIDC/STS endpoints** or invoke an administrator-configured local **`credential_process`**. This is non-content traffic. CrispVoice neither controls nor guarantees that external credential process's own network destinations, storage, or logging behavior, and it never sends transcript or rewrite content to that process.
-- CrispVoice has **no developer backend, proxy, telemetry, or content-bearing logging**. The developer never sees, stores, logs, or proxies user audio, transcripts, prompts, responses, message text, API keys, AWS credentials, or raw credential-provider output.
+- When Bedrock is selected, standard AWS profile authentication may contact **AWS SSO/OIDC/STS endpoints** or invoke an administrator-configured local **`credential_process`**. This non-content authentication traffic is initiated only for the explicitly selected standard AWS profile/provider. CrispVoice neither controls nor guarantees that external credential process's own network destinations, storage, or logging behavior, and it never sends transcript or rewrite content to that process.
+- CrispVoice has **no developer backend, proxy, telemetry, analytics, or content-bearing logging**. The developer never sees, stores, logs, or proxies user audio, transcripts, prompts, responses, message text, API keys, AWS credentials, or raw credential-provider output.
 - **AWS credentials are never stored by CrispVoice.** The Anthropic API key remains in the user's macOS Keychain; Bedrock uses the user's existing AWS identity and standard profile configuration.
 - **Honest caveat:** The selected provider receives the text being rewritten: Anthropic receives it under the user's own key, while Bedrock receives it under the user's AWS identity and its configured endpoint/profile. No developer-controlled service is in either path.
 - **Future option (out of scope for v1):** a fully-offline mode that uses a *local* LLM for the rewrite too, so even the crisp step never touches the network.
