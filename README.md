@@ -166,7 +166,7 @@ The app intentionally does not use the Mac App Store sandbox because Accessibili
 
 ## Installation
 
-For technical users, CrispVoice can be installed or upgraded from Terminal:
+Users can install or upgrade CrispVoice from Terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PrachiBhopatkar/CrispVoice/main/scripts/install.sh | /bin/bash
@@ -186,7 +186,7 @@ After installation:
 
 CrispVoice is currently a macOS MVP. The core workflow includes global hotkey recording, live on-device transcription, Claude-powered rewriting, message variants, tone controls, secure API-key storage, permission guidance, and paste-back into the previously focused application.
 
-The current release is `v0.2.0`.
+The current release is `v0.2.2`.
 
 ## Requirements
 
