@@ -206,6 +206,22 @@ The following instructions are for contributors building or testing CrispVoice f
 
 ### Build
 
+CrispVoice links the Amazon Bedrock SDK as a prebuilt static library rather
+than as a native Xcode SPM dependency (Xcode's SPM plugin support has a
+build-system regression with `aws-sdk-swift`'s codegen plugin). Before running
+`xcodegen generate` for the first time, and again whenever
+`vendor/BedrockSDKBridge/Package.swift`'s pinned `aws-sdk-swift` version
+changes, build the vendored library:
+
+```bash
+./scripts/build-bedrock-sdk-bridge.sh
+```
+
+This produces `vendor/lib/libBedrockSDKBridge.a` and
+`vendor/lib/BedrockSDKBridge.swiftmodule/`, which `project.yml` links into the
+`CrispVoice` and `CrispVoiceTests` targets via linker settings. These are
+build artifacts (gitignored) and must be regenerated locally.
+
 ```bash
 brew install xcodegen
 xcodegen generate

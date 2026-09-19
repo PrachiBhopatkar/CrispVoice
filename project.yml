@@ -31,6 +31,15 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_ENTITLEMENTS: Sources/CrispVoice/App/CrispVoice.entitlements
         SWIFT_VERSION: "5.9"
+        LIBRARY_SEARCH_PATHS:
+          - $(inherited)
+          - $(PROJECT_DIR)/vendor/lib
+        SWIFT_INCLUDE_PATHS:
+          - $(inherited)
+          - $(PROJECT_DIR)/vendor/lib
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lBedrockSDKBridge
     dependencies:
       - package: HotKey
   CrispVoiceTests:
@@ -41,6 +50,15 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        LIBRARY_SEARCH_PATHS:
+          - $(inherited)
+          - $(PROJECT_DIR)/vendor/lib
+        SWIFT_INCLUDE_PATHS:
+          - $(inherited)
+          - $(PROJECT_DIR)/vendor/lib
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lBedrockSDKBridge
     dependencies:
       - target: CrispVoice
 schemes:
