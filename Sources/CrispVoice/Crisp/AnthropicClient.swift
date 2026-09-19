@@ -92,3 +92,6 @@ final class AnthropicClient {
         return text
     }
 }
+
+extension AnthropicClient: TextCompleter {
+}

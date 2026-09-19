@@ -1,21 +1,11 @@
 import Foundation
 
-protocol TextCompleter {
-    func complete(system: String, user: String) async throws -> String
-}
-
-extension AnthropicClient: TextCompleter {
-    func complete(system: String, user: String) async throws -> String {
-        try await complete(system: system, user: user, maxTokens: 1024)
-    }
-}
-
 final class CrispEngine {
     enum OutputError: LocalizedError, Equatable {
         case invalidStructuredResponse
 
         var errorDescription: String? {
-            "Anthropic returned invalid message variants twice. Please try again."
+            "Rewrite provider returned invalid message variants twice. Please try again."
         }
     }
 
@@ -31,7 +21,8 @@ final class CrispEngine {
         let user = CrispPrompt.user(transcript: transcript, tone: tone)
         let raw = try await completer.complete(
             system: CrispPrompt.system(variantCount: variantCount),
-            user: user
+            user: user,
+            maxTokens: 1024
         )
 
         do {
@@ -39,7 +30,8 @@ final class CrispEngine {
         } catch is CrispResult.ParseError {
             let retriedRaw = try await completer.complete(
                 system: CrispPrompt.repairSystem(variantCount: variantCount),
-                user: user
+                user: user,
+                maxTokens: 1024
             )
             do {
                 return try CrispResult.parse(retriedRaw)
