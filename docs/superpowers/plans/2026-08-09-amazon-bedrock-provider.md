@@ -21,6 +21,7 @@
 - A task is not complete until its verification output is observed and it is committed with the task's exact commit message. Preserve unrelated work and the existing untracked `.dev/` directory.
 - Live AWS access is forbidden in XCTest. The only live AWS checks are explicit manual acceptance steps on the office laptop.
 - Keep AWS/Smithy SwiftLog at its default error threshold and Bedrock `clientLogMode: .none`. CrispVoice must not call `SDKLoggingSystem.initialize` with `.debug`/`.trace`, bootstrap a verbose SwiftLog handler, or set an AWS SDK verbose logging environment in development/release launch scripts; the SDK profile resolver internally emits raw failure descriptions at debug level.
+- **Never invoke `xcodebuild` to compile any target inside the `aws-sdk-swift` package graph, directly or indirectly.** Xcode 26.4 has a confirmed build-system regression where `SmithyCodeGeneratorPlugin`'s declared output files (e.g. `InternalAWSCognitoIdentity*.swift`) are not found by the compiler even after the plugin runs successfully and its trust dialog is accepted — verified independently of SDK version (reproduces on both 1.7.47 and 1.7.87) and independently of plugin trust state. Plain `swift build`/`swift test` (SwiftPM's own build system) compiles the identical dependency graph cleanly. Task 2 therefore builds `aws-sdk-swift` only via `swift build`, in the separate `vendor/BedrockSDKBridge` package, and CrispVoice links the result as a prebuilt static library — never as a native Xcode SPM package dependency. `swift-create-xcframework` and similar tools are not used for this reason: they wrap `xcodebuild` internally and would reintroduce the same regression. `lipo` and plain file copies are fine — they operate on already-built binaries and invoke no build-tool plugin.
 
 ---
 
@@ -40,15 +41,27 @@ CrispVoice/
 │       └── specs/2026-06-12-crispvoice-design.md
 ├── scripts/
 │   └── privacy-smoke-test.sh                           (new)
+├── vendor/
+│   ├── BedrockSDKBridge/                               (new; separate SwiftPM package, built only via `swift build`/`swift test`, never `xcodebuild`)
+│   │   ├── Package.swift
+│   │   ├── Sources/BedrockSDKBridge/
+│   │   │   ├── BedrockSDKBridge.swift
+│   │   │   └── BedrockErrorMapper.swift
+│   │   └── Tests/BedrockSDKBridgeTests/
+│   │       ├── BedrockSDKBridgeTests.swift
+│   │       ├── CredentialProviderContractTests.swift   (new; formerly planned as a CrispVoiceTests file, moved here in Task 6)
+│   │       └── Fixtures/credential-process-fixture.sh   (new)
+│   └── lib/                                            (new; git-ignored build output, not source)
+├── scripts/
+│   └── build-bedrock-sdk-bridge.sh                     (new)
 ├── Sources/CrispVoice/
 │   ├── App/
 │   │   ├── AppDelegate.swift
 │   │   └── DebugLog.swift
 │   ├── Crisp/
 │   │   ├── AnthropicClient.swift
-│   │   ├── BedrockSDKCompileProbe.swift               (new in Task 2; deleted in Task 5)
-│   │   ├── BedrockClient.swift                        (new)
-│   │   ├── BedrockClientFactory.swift                 (new)
+│   │   ├── BedrockClient.swift                        (new; thin adapter — imports only `BedrockSDKBridge`, never an AWS SDK module directly)
+│   │   ├── BedrockClientFactory.swift                 (new; thin adapter)
 │   │   ├── CrispEngine.swift
 │   │   ├── RewriteCompleterFactory.swift              (new)
 │   │   ├── RewriteProviderError.swift                 (new)
@@ -63,19 +76,19 @@ CrispVoice/
 │       └── SettingsView.swift
 ├── Tests/CrispVoiceTests/
 │   ├── AnthropicClientTests.swift
-│   ├── AWSCredentialProviderContractTests.swift       (new)
-│   ├── BedrockClientTests.swift                       (new)
+│   ├── BedrockClientTests.swift                       (new; tests only the thin adapter, no AWS SDK types)
 │   ├── CrispEngineTests.swift
 │   ├── PreferencesTests.swift
 │   ├── RewriteCompleterFactoryTests.swift             (new)
 │   ├── RewriteProviderErrorTests.swift                (new)
 │   ├── SettingsModelTests.swift                       (new)
-│   └── Fixtures/
-│       └── credential-process-fixture.sh              (new)
+│   └── Fixtures/                                       (removed — superseded by vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/Fixtures/)
 └── Tests/ReleaseScripts/
     ├── InstallerTests.sh
     └── PrivacyInvariantTests.sh                       (new)
 ```
+
+`Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift` and `Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift`, uncommitted leftovers from an abandoned first attempt at Task 2 (Xcode could not build the `aws-sdk-swift` package graph — see Task 2 below), are deleted by Task 2 rather than modified further.
 
 Task 11 also creates a non-sensitive verification record at:
 
@@ -121,6 +134,33 @@ struct BedrockConfiguration: Equatable {
     init(profileName: String, region: String, modelID: String) throws
 }
 ```
+
+Additional interfaces, owned by `vendor/BedrockSDKBridge` and consumed only by `BedrockClient`/`BedrockClientFactory` (Task 5). No AWS SDK type (`BedrockRuntimeClient`, `ConverseInput`, `ProfileAWSCredentialIdentityResolver`, etc.) is ever imported anywhere under `Sources/CrispVoice/` or `Tests/CrispVoiceTests/` — those imports are confined to `vendor/BedrockSDKBridge/Sources/` and `vendor/BedrockSDKBridge/Tests/`.
+
+```swift
+public struct BridgedBedrockConfiguration {
+    public let profileName: String
+    public let region: String
+    public let modelID: String
+    public init(profileName: String, region: String, modelID: String)
+}
+
+public enum BridgedBedrockError: Error, Equatable {
+    case credentialsUnavailable
+    case accessDenied
+    case invalidModelOrRegion
+    case throttled
+    case network
+    case invalidResponse
+}
+
+public struct BridgedBedrockClient {
+    public init(configuration: BridgedBedrockConfiguration) throws
+    public func complete(system: String, user: String, maxTokens: Int) async throws -> String
+}
+```
+
+`BridgedBedrockError`'s six cases are a strict subset of `RewriteProviderError`'s seven — `.missingConfiguration` never occurs here because `BridgedBedrockConfiguration` requires all three fields at construction and `BedrockConfiguration.init` (Task 3) already rejects blank Region/model before the bridge is ever called.
 
 The exact persisted keys are `rewriteProvider`, `anthropicModelName`, `bedrockProfileName`, `bedrockRegion`, `bedrockModelID`, and existing `variantCount`. Legacy `modelName` is migration input only.
 
@@ -195,77 +235,108 @@ git commit -m "docs: permit user-selected Bedrock provider"
 
 ---
 
-## Task 2: Pin AWS SDK 1.7.47 and prove the macOS credential/runtime API compiles
+## Task 2: Build and link `aws-sdk-swift` as a vendored static library
+
+The original approach (native Xcode SPM package dependency on `aws-sdk-swift`)
+was abandoned — see the Global Constraints note above on the Xcode 26.4
+`SmithyCodeGeneratorPlugin` regression, verified independently of SDK version
+and plugin trust state. This task builds the same pinned SDK version with
+`swift build` instead of `xcodebuild`, and links the result into CrispVoice
+as a prebuilt universal static library. The SDK pin (`1.7.47`) and the
+exact construction code are unchanged from the original design; only the
+build/link mechanism differs.
 
 **Files:**
 
+- Create: `vendor/BedrockSDKBridge/Package.swift`
+- Create: `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockSDKBridge.swift`
+- Create: `vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/BedrockSDKBridgeTests.swift`
+- Create: `scripts/build-bedrock-sdk-bridge.sh`
 - Modify: `project.yml`
-- Create: `Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift`
-- Create: `Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift`
+- Modify: `.gitignore` (add `vendor/lib/`)
+- Delete: `Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift`
+- Delete: `Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift`
 
-- [ ] **Step 1: Add a compile-spike test using an explicit profile**
+- [ ] **Step 1: Create the vendor package and a compile-only probe test**
 
-Add an app-internal compile probe that imports `AWSBedrockRuntime` and `AWSSDKIdentity`, then add a test that invokes the probe. The probe creates:
-
-```swift
-let resolver = ProfileAWSCredentialIdentityResolver(
-    profileName: "office",
-    configFilePath: "/tmp/not-read-by-this-test",
-    credentialsFilePath: "/tmp/not-read-by-this-test"
-)
-let config = try BedrockRuntimeClient.BedrockRuntimeClientConfig(
-    awsCredentialIdentityResolver: resolver,
-    region: "us-west-2"
-)
-_ = BedrockRuntimeClient(config: config)
-```
-
-The probe returns `Void` after constructing the client. This test is compile-only: it must not call `getIdentity()` or make a network request.
-
-- [ ] **Step 2: Run project generation and confirm dependency symbols fail**
-
-Run:
-
-```bash
-xcodegen generate
-xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' -only-testing:CrispVoiceTests/AWSCredentialProviderContractTests test
-```
-
-Expected: compilation fails because the two AWS products are not yet dependencies.
-
-- [ ] **Step 3: Pin the verified package and products**
-
-Add to `project.yml`:
-
-```yaml
-packages:
-  AWSSDKSwift:
-    url: https://github.com/awslabs/aws-sdk-swift.git
-    exactVersion: 1.7.47
-```
-
-Add these dependencies to both `CrispVoice` and `CrispVoiceTests` so production code and SDK-modeled-error tests import the modules directly:
-
-```yaml
-      - package: AWSSDKSwift
-        product: AWSBedrockRuntime
-      - package: AWSSDKSwift
-        product: AWSSDKIdentity
-```
-
-Do not add Bedrock control-plane packages or model-listing services.
-
-- [ ] **Step 4: Add the compile probe**
-
-Create `BedrockSDKCompileProbe.swift` with:
+Create `vendor/BedrockSDKBridge/Package.swift`:
 
 ```swift
-enum BedrockSDKCompileProbe {
-    static func constructClient(profileName: String, region: String) throws {
-        let resolver = ProfileAWSCredentialIdentityResolver(profileName: profileName)
+// swift-tools-version:5.9
+import PackageDescription
+
+let package = Package(
+    name: "BedrockSDKBridge",
+    platforms: [.macOS(.v13)],
+    products: [
+        .library(name: "BedrockSDKBridge", type: .static, targets: ["BedrockSDKBridge"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/awslabs/aws-sdk-swift.git", exact: "1.7.47")
+    ],
+    targets: [
+        .target(
+            name: "BedrockSDKBridge",
+            dependencies: [
+                .product(name: "AWSBedrockRuntime", package: "aws-sdk-swift"),
+                .product(name: "AWSSDKIdentity", package: "aws-sdk-swift")
+            ]
+        ),
+        .testTarget(
+            name: "BedrockSDKBridgeTests",
+            dependencies: ["BedrockSDKBridge"]
+        )
+    ]
+)
+```
+
+Create `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockSDKBridge.swift` with only these type declarations and `fatalError("not implemented")` bodies — no AWS SDK usage yet; Task 5 fills these in:
+
+```swift
+public struct BridgedBedrockConfiguration {
+    public let profileName: String
+    public let region: String
+    public let modelID: String
+    public init(profileName: String, region: String, modelID: String) {
+        self.profileName = profileName
+        self.region = region
+        self.modelID = modelID
+    }
+}
+
+public enum BridgedBedrockError: Error, Equatable {
+    case credentialsUnavailable
+    case accessDenied
+    case invalidModelOrRegion
+    case throttled
+    case network
+    case invalidResponse
+}
+
+public struct BridgedBedrockClient {
+    public init(configuration: BridgedBedrockConfiguration) throws {
+        fatalError("not implemented")
+    }
+    public func complete(system: String, user: String, maxTokens: Int) async throws -> String {
+        fatalError("not implemented")
+    }
+}
+```
+
+Create `vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/BedrockSDKBridgeTests.swift`:
+
+```swift
+import XCTest
+import AWSBedrockRuntime
+import AWSSDKIdentity
+@testable import BedrockSDKBridge
+
+final class BedrockSDKBridgeTests: XCTestCase {
+    func testConstructsUnderlyingBedrockRuntimeClient() throws {
+        let resolver = ProfileAWSCredentialIdentityResolver(profileName: "office")
         let config = try BedrockRuntimeClient.BedrockRuntimeClientConfig(
             awsCredentialIdentityResolver: resolver,
-            region: region,
+            region: "us-west-2",
             clientLogMode: .none
         )
         _ = BedrockRuntimeClient(config: config)
@@ -273,34 +344,114 @@ enum BedrockSDKCompileProbe {
 }
 ```
 
-The test calls `constructClient(profileName: "office", region: "us-west-2")`. Explicitly provide the selected profile; never rely on `AWS_PROFILE`. Version 1.7.47 uses `BedrockRuntimeClientConfig` and `clientLogMode: .none`; use those non-deprecated APIs exactly.
+This test is compile-only: it must not call `getIdentity()` or make a network request.
 
-- [ ] **Step 5: Regenerate and run the spike plus full suite**
+- [ ] **Step 2: Run it with `swift test` and confirm it passes**
 
-Run:
+From `vendor/BedrockSDKBridge/`:
 
 ```bash
+swift test --filter BedrockSDKBridgeTests/testConstructsUnderlyingBedrockRuntimeClient
+```
+
+Expected: package resolution pins `aws-sdk-swift` at exactly `1.7.47`, the test compiles and passes, no network access. If this fails, stop and re-plan — the premise that plain SwiftPM builds this dependency graph cleanly (already verified once outside this worktree) does not hold on this machine/toolchain.
+
+- [ ] **Step 3: Write the build/packaging script**
+
+Create `scripts/build-bedrock-sdk-bridge.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PACKAGE_DIR="$ROOT_DIR/vendor/BedrockSDKBridge"
+OUT_DIR="$ROOT_DIR/vendor/lib"
+
+rm -rf "$OUT_DIR"
+mkdir -p "$OUT_DIR/BedrockSDKBridge.swiftmodule"
+
+for ARCH in arm64 x86_64; do
+  echo "Building BedrockSDKBridge for $ARCH..."
+  swift build \
+    --package-path "$PACKAGE_DIR" \
+    -c release \
+    --arch "$ARCH"
+done
+
+lipo -create \
+  -output "$OUT_DIR/libBedrockSDKBridge.a" \
+  "$PACKAGE_DIR/.build/arm64-apple-macosx/release/libBedrockSDKBridge.a" \
+  "$PACKAGE_DIR/.build/x86_64-apple-macosx/release/libBedrockSDKBridge.a"
+
+cp "$PACKAGE_DIR/.build/arm64-apple-macosx/release/Modules/BedrockSDKBridge.swiftmodule" \
+   "$OUT_DIR/BedrockSDKBridge.swiftmodule/arm64-apple-macos.swiftmodule"
+cp "$PACKAGE_DIR/.build/x86_64-apple-macosx/release/Modules/BedrockSDKBridge.swiftmodule" \
+   "$OUT_DIR/BedrockSDKBridge.swiftmodule/x86_64-apple-macos.swiftmodule"
+
+lipo -archs "$OUT_DIR/libBedrockSDKBridge.a"
+echo "vendor/lib/libBedrockSDKBridge.a and BedrockSDKBridge.swiftmodule are up to date."
+```
+
+Make it executable: `chmod +x scripts/build-bedrock-sdk-bridge.sh`.
+
+- [ ] **Step 4: Run the script and confirm the exact output files it claims**
+
+```bash
+./scripts/build-bedrock-sdk-bridge.sh
+ls -la vendor/lib/
+ls vendor/lib/BedrockSDKBridge.swiftmodule/
+lipo -archs vendor/lib/libBedrockSDKBridge.a
+```
+
+Expected: exit 0; `vendor/lib/libBedrockSDKBridge.a` exists; `lipo -archs` reports exactly `x86_64 arm64`; `vendor/lib/BedrockSDKBridge.swiftmodule/` contains both per-arch `.swiftmodule` files.
+
+If `swift build --arch x86_64` fails on Apple Silicon because a transitive C target (`aws-crt-swift`) cannot cross-compile that way, fall back to running the `arm64` build natively and the `x86_64` build via `arch -x86_64 swift build -c release` (Rosetta) instead of `--arch x86_64`, adjusting the script's `.build` path accordingly. Record whichever approach actually works in this step's commit; do not silently drop x86_64 support — Task 11 requires a clean x86_64 Release build.
+
+- [ ] **Step 5: Wire the vendored library into `project.yml`**
+
+Add to the `CrispVoice` target's `settings.base` in `project.yml` (do **not** add an `AWSSDKSwift` package dependency):
+
+```yaml
+      LIBRARY_SEARCH_PATHS:
+        - $(inherited)
+        - $(PROJECT_DIR)/vendor/lib
+      SWIFT_INCLUDE_PATHS:
+        - $(inherited)
+        - $(PROJECT_DIR)/vendor/lib
+      OTHER_LDFLAGS:
+        - $(inherited)
+        - -lBedrockSDKBridge
+```
+
+Apply the same three settings to the `CrispVoiceTests` target.
+
+- [ ] **Step 6: Prove CrispVoice itself can import and call the bridge**
+
+Add a temporary `import BedrockSDKBridge` line to `Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift` in place of its existing content (it is deleted in Step 7; this step only proves linkage before that happens). Run:
+
+```bash
+./scripts/build-bedrock-sdk-bridge.sh
 xcodegen generate
-xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' -only-testing:CrispVoiceTests/AWSCredentialProviderContractTests test
-xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' test
-xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -configuration Debug build
-git diff --check
+xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' -configuration Debug build 2>&1 | tee /tmp/task2-build.log
+grep -i smithy /tmp/task2-build.log || true
 ```
 
-Expected: package resolution pins 1.7.47, compile-spike test passes without network access, full suite passes, and build reports `** BUILD SUCCEEDED **`.
+Expected: `** BUILD SUCCEEDED **`; the `grep` for `smithy` returns nothing — confirming `SmithyCodeGeneratorPlugin` never runs as part of this build, which is the actual proof the Xcode regression is avoided rather than just relocated.
 
-- [ ] **Step 6: Review dependency scope and generated linkage**
-
-Stage A: verify only runtime and identity products were added and deployment remains macOS 13. Stage B: inspect the resolved package version, confirm no App Sandbox setting or signing entitlement changed, and confirm the test cannot contact AWS.
-
-Also verify from the pinned SDK source that `clientLogMode: .none` disables request/response logging and that the default SDK log threshold suppresses the profile resolver's debug messages. Record this in a short comment next to factory logging configuration; do not initialize SwiftLog globally in CrispVoice.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Delete the abandoned probe files and commit**
 
 ```bash
-git add project.yml Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift
-git commit -m "build: add AWS Bedrock runtime SDK"
+rm -f Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift
+rm -f Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift
+xcodegen generate
+xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' -configuration Debug build
+git add vendor/BedrockSDKBridge project.yml scripts/build-bedrock-sdk-bridge.sh .gitignore
+git add -u Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift
+git commit -m "build: vendor AWS Bedrock SDK as a prebuilt static library"
 ```
+
+Add `vendor/lib/` to `.gitignore` before this commit — it is a build artifact regenerated by `scripts/build-bedrock-sdk-bridge.sh`, not source. Document in this commit (a short paragraph in `README.md`'s build/setup section) that `./scripts/build-bedrock-sdk-bridge.sh` must run at least once, and again whenever `vendor/BedrockSDKBridge/Package.swift`'s pinned `aws-sdk-swift` version changes, before `xcodegen generate && xcodebuild`.
 
 ---
 
@@ -469,15 +620,29 @@ git commit -m "refactor: standardize text completer contract"
 
 ## Task 5: Implement Bedrock Converse behind a safe error boundary
 
+**Since Task 2, this task is split across two packages.** The SDK-facing
+implementation (the `BedrockConverseCalling` seam, `ConverseInput`/
+`ConverseOutput` construction, and modeled-error mapping — Steps 2, 4, and
+5 below) is written inside `vendor/BedrockSDKBridge`, built and tested with
+`swift test`, because that is the only place `AWSBedrockRuntime`/
+`AWSSDKIdentity` types are visible. CrispVoice's own
+`Sources/CrispVoice/Crisp/BedrockClient.swift` and `BedrockClientFactory.swift`
+are thin adapters over the vendor package's public `BridgedBedrockClient`/
+`BridgedBedrockConfiguration`/`BridgedBedrockError` API (Shared Interfaces)
+and contain no AWS SDK import. `BedrockSDKCompileProbe.swift` was already
+deleted in Task 2, not here.
+
 **Files:**
 
 - Modify: `Sources/CrispVoice/Crisp/RewriteProviderError.swift`
 - Create: `Sources/CrispVoice/Crisp/SafeErrorPresenter.swift`
-- Create: `Sources/CrispVoice/Crisp/BedrockClient.swift`
-- Delete: `Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift`
-- Create: `Sources/CrispVoice/Crisp/BedrockClientFactory.swift`
+- Create: `Sources/CrispVoice/Crisp/BedrockClient.swift` (thin adapter, no AWS SDK import)
+- Create: `Sources/CrispVoice/Crisp/BedrockClientFactory.swift` (thin adapter, no AWS SDK import)
+- Modify: `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockSDKBridge.swift` (replace the Step-1 placeholder bodies with the real implementation)
+- Create: `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockErrorMapper.swift`
+- Modify: `vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/BedrockSDKBridgeTests.swift`
 - Modify: `Tests/CrispVoiceTests/RewriteProviderErrorTests.swift`
-- Create: `Tests/CrispVoiceTests/BedrockClientTests.swift`
+- Create: `Tests/CrispVoiceTests/BedrockClientTests.swift` (tests only the adapter mapping, no fake AWS SDK conformer needed here)
 
 - [ ] **Step 1: Extend safe-error tests through the application presentation boundary**
 
@@ -512,9 +677,9 @@ struct SafeErrorPresenter {
 
 For a `RewriteProviderError`, `present` writes only `AppDelegate.fail code=<diagnosticCode>` and returns its safe message. For any other error, it writes only `AppDelegate.fail code=unexpected` and returns a fixed generic message. Inject an in-memory closure and prove fake credentials, ARNs, commands, stderr, prompts, and response bodies never appear in either output.
 
-- [ ] **Step 2: Write failing request/response tests around a narrow SDK seam**
+- [ ] **Step 2: Write failing request/response tests around a narrow SDK seam, inside the vendor package**
 
-Define in `BedrockClient.swift`:
+In `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockSDKBridge.swift`, define:
 
 ```swift
 protocol BedrockConverseCalling {
@@ -524,7 +689,7 @@ protocol BedrockConverseCalling {
 extension BedrockRuntimeClient: BedrockConverseCalling {}
 ```
 
-Use a fake conformer to assert `BedrockClient.complete(system:user:maxTokens:)` produces:
+In `vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/BedrockSDKBridgeTests.swift`, use a fake conformer to assert `BridgedBedrockClient.complete(system:user:maxTokens:)` produces:
 
 - `modelId` equal to the configured opaque identifier;
 - `system == [.text(system)]`;
@@ -532,20 +697,23 @@ Use a fake conformer to assert `BedrockClient.complete(system:user:maxTokens:)` 
 - `inferenceConfig.maxTokens` equal to the caller's value;
 - no request metadata, guardrail, tools, or additional fields.
 
-Add response tests for one text block, joined multiple text blocks, empty content, non-message output, and non-text-only output. Add modeled error tests for `AccessDeniedException`, `ValidationException`, `ResourceNotFoundException`, `ThrottlingException`, `ServiceQuotaExceededException`, and a generic transport error containing fake credentials/ARN/prompt.
+Add response tests for one text block, joined multiple text blocks, empty content, non-message output, and non-text-only output. Add modeled error tests for `AccessDeniedException`, `ValidationException`, `ResourceNotFoundException`, `ThrottlingException`, `ServiceQuotaExceededException`, and a generic transport error containing fake credentials/ARN/prompt, asserting each maps to the matching `BridgedBedrockError` case.
+
+Separately, in `Tests/CrispVoiceTests/BedrockClientTests.swift`, write tests for the CrispVoice-side adapter only: that `BedrockClientFactory.make(configuration:)` builds a `BridgedBedrockConfiguration` whose three fields equal the input `BedrockConfiguration`'s, and that `RewriteProviderError(bridged:)` maps each of the six `BridgedBedrockError` cases to the matching `RewriteProviderError` case. These tests need no fake AWS SDK conformer — the real SDK-facing seam lives in the vendor package's own tests above.
 
 - [ ] **Step 3: Run focused tests and confirm missing implementation**
 
 ```bash
+cd vendor/BedrockSDKBridge && swift test --filter BedrockSDKBridgeTests && cd ../..
 xcodegen generate
 xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' -only-testing:CrispVoiceTests/RewriteProviderErrorTests -only-testing:CrispVoiceTests/BedrockClientTests test
 ```
 
-Expected: compile failure for the new client/error boundary.
+Expected: compile failure for the new client/error boundary in both the vendor package and CrispVoice.
 
-- [ ] **Step 4: Implement the closed error enum and mapper**
+- [ ] **Step 4: Implement the closed error enum and mapper, inside the vendor package**
 
-The raw SDK `Error` must be consumed inside `BedrockClient`/factory. Map known generated types by type, never by embedding `localizedDescription`:
+The raw SDK `Error` is consumed only inside `vendor/BedrockSDKBridge`. Create `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockErrorMapper.swift` mapping known generated types by type, never by embedding `localizedDescription`:
 
 - profile/identity resolution failures → `.credentialsUnavailable`;
 - `AccessDeniedException` → `.accessDenied`;
@@ -556,46 +724,105 @@ The raw SDK `Error` must be consumed inside `BedrockClient`/factory. Map known g
 
 The mapper may classify unknown errors as `.network`, but it must never retain the source error or source text in a user/loggable value.
 
-Implement this as an internal `BedrockErrorMapper.map(_:) -> RewriteProviderError`. It must classify known AWS identity resolver failures by type as `.credentialsUnavailable`; contract tests will call the same mapper directly after isolated resolver failures.
+Implement this as an internal (non-`public`) `BedrockErrorMapper.map(_:) -> BridgedBedrockError`. It must classify known AWS identity resolver failures by type as `.credentialsUnavailable`; the vendor package's own contract tests (Task 6) call the same mapper directly after isolated resolver failures.
 
-- [ ] **Step 5: Implement `BedrockClient` and finish the factory**
+- [ ] **Step 5: Implement `BridgedBedrockClient` and the CrispVoice adapters**
 
-`BedrockClient` stores only `modelID` and `BedrockConverseCalling`. Construct `ConverseInput` using the exact 1.7.47 types. Extract and concatenate only `.text` blocks; trim solely to decide whether the result is empty, returning the original non-empty text.
-
-`BedrockClientFactory.make` must:
+In `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockSDKBridge.swift`, replace the Task 2 placeholder bodies. `BridgedBedrockClient` stores only `modelID` and a `BedrockConverseCalling`. Construct `ConverseInput` using the exact 1.7.47 types. Extract and concatenate only `.text` blocks; trim solely to decide whether the result is empty, returning the original non-empty text. Its `public init(configuration:)` must:
 
 1. create `ProfileAWSCredentialIdentityResolver(profileName:)` with the normalized explicit profile;
-2. create `BedrockRuntimeClient.BedrockRuntimeClientConfig(awsCredentialIdentityResolver:region:clientLogMode:)` with SDK HTTP/body logging off;
-3. create `BedrockRuntimeClient` and inject it into `BedrockClient`;
-4. translate construction errors to the closed safe enum.
+2. create `BedrockRuntimeClient.BedrockRuntimeClientConfig(awsCredentialIdentityResolver:region:clientLogMode:)` with SDK HTTP/body logging off (`clientLogMode: .none`);
+3. create `BedrockRuntimeClient` and inject it;
+4. translate construction errors through `BedrockErrorMapper` to `BridgedBedrockError`, `throw`n from the public initializer.
 
 Do not call `getIdentity()` separately during every rewrite; allow the SDK resolver/client to own refresh.
 
-Declare `BedrockClientFactory: BedrockClientBuilding` with the exact shared signature.
+Then, in CrispVoice, implement the thin adapters exactly:
 
-Move the verified client-construction code out of `BedrockSDKCompileProbe.swift` into this factory, then delete the probe. Move its compile-only assertion into the factory/client tests so SDK construction remains covered without a temporary production type.
+`Sources/CrispVoice/Crisp/BedrockClient.swift`:
+
+```swift
+import BedrockSDKBridge
+
+struct BedrockClient: TextCompleter {
+    private let bridged: BridgedBedrockClient
+
+    init(bridged: BridgedBedrockClient) {
+        self.bridged = bridged
+    }
+
+    func complete(system: String, user: String, maxTokens: Int) async throws -> String {
+        do {
+            return try await bridged.complete(system: system, user: user, maxTokens: maxTokens)
+        } catch let error as BridgedBedrockError {
+            throw RewriteProviderError(bridged: error)
+        }
+    }
+}
+```
+
+Add to `Sources/CrispVoice/Crisp/RewriteProviderError.swift`:
+
+```swift
+extension RewriteProviderError {
+    init(bridged: BridgedBedrockError) {
+        switch bridged {
+        case .credentialsUnavailable: self = .credentialsUnavailable
+        case .accessDenied: self = .accessDenied
+        case .invalidModelOrRegion: self = .invalidModelOrRegion
+        case .throttled: self = .throttled
+        case .network: self = .network
+        case .invalidResponse: self = .invalidResponse
+        }
+    }
+}
+```
+
+`Sources/CrispVoice/Crisp/BedrockClientFactory.swift`:
+
+```swift
+import BedrockSDKBridge
+
+struct BedrockClientFactory: BedrockClientBuilding {
+    func make(configuration: BedrockConfiguration) throws -> TextCompleter {
+        let bridgedConfig = BridgedBedrockConfiguration(
+            profileName: configuration.profileName,
+            region: configuration.region,
+            modelID: configuration.modelID
+        )
+        do {
+            let bridged = try BridgedBedrockClient(configuration: bridgedConfig)
+            return BedrockClient(bridged: bridged)
+        } catch let error as BridgedBedrockError {
+            throw RewriteProviderError(bridged: error)
+        }
+    }
+}
+```
 
 - [ ] **Step 6: Verify focused tests, full suite, and clean build**
 
 ```bash
+cd vendor/BedrockSDKBridge && swift test && cd ../..
+./scripts/build-bedrock-sdk-bridge.sh
 xcodegen generate
 xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' -only-testing:CrispVoiceTests/RewriteProviderErrorTests -only-testing:CrispVoiceTests/BedrockClientTests test
 xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' test
 xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -configuration Debug build
-if rg -n "SDKLoggingSystem\.initialize|LoggingSystem\.bootstrap|logLevel.*\.(debug|trace)|AWS.*LOG.*(debug|trace)" Sources scripts; then exit 1; fi
+if rg -n "SDKLoggingSystem\.initialize|LoggingSystem\.bootstrap|logLevel.*\.(debug|trace)|AWS.*LOG.*(debug|trace)" Sources scripts vendor/BedrockSDKBridge/Sources; then exit 1; fi
 git diff --check
 ```
 
-Expected: all tests pass and build succeeds without a live AWS call.
+Expected: all tests (vendor package and CrispVoice) pass and both builds succeed without a live AWS call.
 
 - [ ] **Step 7: Review request privacy and error exhaustiveness**
 
-Stage A: compare every input field and error category with design sections 4, 8, 9, and 13. Stage B: inspect for `print`, `dump`, interpolation of raw errors, SDK debug modes, verbose `SDKLoggingSystem`/SwiftLog bootstrap, request/response debug descriptions, and unnecessary AWS dependencies.
+Stage A: compare every input field and error category with design sections 4, 8, 9, and 13. Stage B: inspect for `print`, `dump`, interpolation of raw errors, SDK debug modes, verbose `SDKLoggingSystem`/SwiftLog bootstrap, request/response debug descriptions, and unnecessary AWS dependencies. Also confirm no `Sources/CrispVoice/` or `Tests/CrispVoiceTests/` file imports `AWSBedrockRuntime` or `AWSSDKIdentity` directly (`rg -n "^import AWS" Sources/CrispVoice Tests/CrispVoiceTests` must return nothing).
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/CrispVoice/Crisp/RewriteProviderError.swift Sources/CrispVoice/Crisp/SafeErrorPresenter.swift Sources/CrispVoice/Crisp/BedrockClient.swift Sources/CrispVoice/Crisp/BedrockClientFactory.swift Sources/CrispVoice/Crisp/BedrockSDKCompileProbe.swift Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift Tests/CrispVoiceTests/RewriteProviderErrorTests.swift Tests/CrispVoiceTests/BedrockClientTests.swift
+git add vendor/BedrockSDKBridge Sources/CrispVoice/Crisp/RewriteProviderError.swift Sources/CrispVoice/Crisp/SafeErrorPresenter.swift Sources/CrispVoice/Crisp/BedrockClient.swift Sources/CrispVoice/Crisp/BedrockClientFactory.swift Tests/CrispVoiceTests/RewriteProviderErrorTests.swift Tests/CrispVoiceTests/BedrockClientTests.swift
 git commit -m "feat: add native Bedrock Converse client"
 ```
 
@@ -603,11 +830,17 @@ git commit -m "feat: add native Bedrock Converse client"
 
 ## Task 6: Prove explicit `credential_process` resolution and refresh without a login shell
 
+**Since Task 2, this task's tests live in the vendor package**, because
+`ProfileAWSCredentialIdentityResolver` is only visible there. Everything
+about the fixture's behavior, the assertions, and the safe-mapping
+requirement is unchanged from the original design — only the file
+locations and test runner (`swift test` instead of `xcodebuild`) differ.
+
 **Files:**
 
-- Modify: `Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift`
-- Create: `Tests/CrispVoiceTests/Fixtures/credential-process-fixture.sh`
-- Modify: `Sources/CrispVoice/Crisp/BedrockClientFactory.swift`
+- Create: `vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/CredentialProviderContractTests.swift`
+- Create: `vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/Fixtures/credential-process-fixture.sh`
+- Modify: `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockSDKBridge.swift` (add the internal testable initializer below)
 
 - [ ] **Step 1: Create a deterministic credential-process fixture**
 
@@ -623,48 +856,60 @@ Use obvious test-only values. Never use a real credential or ARN.
 
 Each test creates a private temporary directory, copies the fixture to an absolute no-space path, marks it executable, and writes an AWS config containing a named profile with `credential_process = <absolute path> ...`. Point `ProfileAWSCredentialIdentityResolver` explicitly to that config and an empty temporary credentials file.
 
-Test:
+Test, in `vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/CredentialProviderContractTests.swift`:
 
 1. named-profile resolution succeeds with no `AWS_PROFILE` and no login shell;
 2. two resolutions after first-expiration/fixture advancement obtain different synthetic credentials;
-3. nonzero exit is caught and passed to the production `BedrockErrorMapper.map(_:)`, producing `.credentialsUnavailable` without a live Bedrock call;
+3. nonzero exit is caught and passed to `BedrockErrorMapper.map(_:)`, producing `.credentialsUnavailable` without a live Bedrock call;
 4. malformed JSON follows the same mapper path and produces `.credentialsUnavailable`;
-5. each safe error is passed to `SafeErrorPresenter` with an injected in-memory `writeDiagnostic` closure; stderr containing fake key/token/command text is absent from the captured application log line and user message.
+5. stderr containing fake key/token/command text is absent from the mapped `BridgedBedrockError` value and from any string produced while mapping it — assert this by confirming `BridgedBedrockError` carries no associated value (its cases are bare), so the fixture's stderr text cannot reach any caller by construction, not just by the mapper's present behavior.
 
-Capture the actual application-boundary `SafeErrorPresentation` and diagnostic line in memory. Do not redirect or expose SDK credential output through production code.
+Note on the application-visible boundary: `SafeErrorPresenter` (Task 5 Step 1) already proves generically, from CrispVoice's own test suite, that every `RewriteProviderError` case — including the `.credentialsUnavailable` this task's fixture produces via `RewriteProviderError(bridged:)` — yields only the fixed safe message and stable diagnostic code, never an associated raw value, because `RewriteProviderError`'s cases carry none either. This task does not need to re-exercise `SafeErrorPresenter` with a live fixture; it proves the vendor-package half of the chain, and the type signatures make the two halves compose safely.
+
+Capture the mapped `BridgedBedrockError` values in memory for these assertions. Do not redirect or expose SDK credential output through production code.
 
 - [ ] **Step 3: Run contract tests and observe failures**
 
 ```bash
-xcodegen generate
-xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' -only-testing:CrispVoiceTests/AWSCredentialProviderContractTests test
+cd vendor/BedrockSDKBridge && swift test --filter CredentialProviderContractTests && cd ../..
 ```
 
-Expected: new refresh/failure assertions fail before fixture-aware resolver construction and safe translation are complete.
+Expected: new refresh/failure assertions fail before fixture-aware resolver construction and mapping are complete.
 
 - [ ] **Step 4: Add testable resolver inputs without changing production defaults**
 
-Allow `BedrockClientFactory` internal/test initialization to accept optional `configFilePath` and `credentialsFilePath`; production initialization passes nil so the SDK uses standard `~/.aws/config` and `~/.aws/credentials`. Always pass `profileName` explicitly. Do not add shell execution code to CrispVoice.
+Add an internal (not `public`) initializer to `BridgedBedrockClient` in `vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockSDKBridge.swift` accepting optional `configFilePath` and `credentialsFilePath`:
+
+```swift
+extension BridgedBedrockClient {
+    init(configuration: BridgedBedrockConfiguration, configFilePath: String?, credentialsFilePath: String?) throws {
+        // production `public init(configuration:)` calls this with both nil,
+        // so the SDK uses standard ~/.aws/config and ~/.aws/credentials
+    }
+}
+```
+
+Always pass `profileName` explicitly; never rely on `AWS_PROFILE`. Do not add shell execution code anywhere in CrispVoice or the vendor package — the SDK's own profile resolver invokes the configured `credential_process`.
 
 - [ ] **Step 5: Verify contract and complete suite**
 
 ```bash
+cd vendor/BedrockSDKBridge && swift test && cd ../..
 xcodegen generate
-xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' -only-testing:CrispVoiceTests/AWSCredentialProviderContractTests test
 xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' test
 git diff --check
 ```
 
-Expected: deterministic contract tests and full suite pass without AWS network access.
+Expected: deterministic contract tests (vendor package) and the full CrispVoice suite pass without AWS network access.
 
 - [ ] **Step 6: Review the trust boundary**
 
-Stage A: confirm the tests prove the standard SDK profile resolver—not app-authored process execution—and match design sections 5.3 and 13. Stage B: confirm the injected application log contains only the stable code, no command line is logged, paths are absolute, and temporary permissions are private.
+Stage A: confirm the tests prove the standard SDK profile resolver—not app-authored process execution—and match design sections 5.3 and 13. Stage B: confirm no command line, stderr, or credential value is retained anywhere in `BridgedBedrockError`, that paths are absolute, and that temporary fixture permissions are private.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Sources/CrispVoice/Crisp/BedrockClientFactory.swift Tests/CrispVoiceTests/AWSCredentialProviderContractTests.swift Tests/CrispVoiceTests/Fixtures/credential-process-fixture.sh
+git add vendor/BedrockSDKBridge/Sources/BedrockSDKBridge/BedrockSDKBridge.swift vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/CredentialProviderContractTests.swift vendor/BedrockSDKBridge/Tests/BedrockSDKBridgeTests/Fixtures/credential-process-fixture.sh
 git commit -m "test: verify AWS profile credential process"
 ```
 
@@ -1049,6 +1294,8 @@ Expected: `InstallerTests: PASS`, including preference/Keychain sentinel preserv
 - [ ] **Step 3: Run the remaining automated verification from a clean generated project**
 
 ```bash
+cd vendor/BedrockSDKBridge && swift test && cd ../..
+./scripts/build-bedrock-sdk-bridge.sh
 xcodegen generate
 xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -destination 'platform=macOS' test
 xcodebuild -project CrispVoice.xcodeproj -scheme CrispVoice -configuration Debug build
@@ -1071,11 +1318,11 @@ Build a non-publishing signed development release candidate with a fixed verific
 
 This command creates local candidate artifacts and does not tag or publish a public release. Then verify:
 
-- `lipo -archs` reports both `arm64` and `x86_64` for the main executable and required nested native code;
+- `lipo -archs` reports both `arm64` and `x86_64` for the main executable (the vendored `BedrockSDKBridge` static library is linked directly into that executable, not shipped as a separate nested binary — `vendor/lib/libBedrockSDKBridge.a` itself is a build-time-only artifact and never appears inside the app bundle; confirm this with `find CrispVoice.app -name '*BedrockSDKBridge*'` returning nothing);
 - `codesign --verify --deep --strict --verbose=4` succeeds;
 - entitlements retain Hardened Runtime Audio Input and do not add App Sandbox;
 - installer identity pinning and upgrade path pass;
-- AWS SDK additions did not leave unsigned nested dylibs/frameworks.
+- AWS SDK additions did not leave unsigned nested dylibs/frameworks (expected: none — `BedrockSDKBridge` is a statically linked archive, confirmed absent from the app bundle in Step 3).
 
 Run the parameterized installer suite against that candidate:
 
