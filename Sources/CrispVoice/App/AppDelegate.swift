@@ -1,18 +1,31 @@
 import AppKit
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    private enum AppDelegateError: LocalizedError {
-        case microphoneAccessDenied
+/// A closed, locally-authored error with a fixed, hardcoded message — no
+/// interpolated/dynamic content, same shape as `RewriteProviderError` and
+/// `AnthropicClient.ClientError`. Declared at module scope (rather than
+/// private/nested in `AppDelegate`) so `SafeErrorPresenter` can recognize
+/// and trust it as a fourth safe-to-display error type.
+enum AppDelegateError: LocalizedError {
+    case microphoneAccessDenied
 
-        var errorDescription: String? {
-            switch self {
-            case .microphoneAccessDenied:
-                return "Enable Microphone access for CrispVoice in System Settings to dictate."
-            }
+    /// A stable diagnostic category safe to write to `DebugLog`.
+    var diagnosticCode: String {
+        switch self {
+        case .microphoneAccessDenied:
+            return "microphone_access_denied"
         }
     }
 
+    var errorDescription: String? {
+        switch self {
+        case .microphoneAccessDenied:
+            return "Enable Microphone access for CrispVoice in System Settings to dictate."
+        }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private let appBundleIdentifier = Bundle.main.bundleIdentifier
@@ -242,7 +255,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The single failure boundary for every capture/transcribe/rewrite
     /// error. `SafeErrorPresenter` is the only thing that ever writes a
-    /// diagnostic line here, and it never inspects an untrusted error's own
+    /// diagnostic line here. It trusts only a closed set of locally-authored
+    /// error types with fixed, hardcoded messages (`RewriteProviderError`,
+    /// `AnthropicClient.ClientError`, `TranscriberError`, `AppDelegateError`)
+    /// and never inspects any other, untrusted error's own
     /// message/description — so no provider value, profile, Region, model,
     /// credential, transcript, or response can reach `DebugLog` or the UI
     /// through this path.

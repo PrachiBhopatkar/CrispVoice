@@ -11,11 +11,14 @@ struct SafeErrorPresentation: Equatable {
 /// The single seam through which every rewrite-provider failure (and any
 /// other unexpected error) is translated into something safe to log and
 /// show. `RewriteProviderError`'s own closed set of safe messages is
-/// trusted as-is, and `AnthropicClient.ClientError`'s status-code-only
-/// category/description is trusted the same way; any other error type is
-/// treated as unexpected and never inspected for its message/description,
-/// so no credential, ARN, command, stderr, prompt, or response-body text it
-/// might carry can reach a log or the UI.
+/// trusted as-is, and so are `AnthropicClient.ClientError` (status-code-only
+/// category/description), `TranscriberError`, and `AppDelegateError` — all
+/// four are closed, locally-authored enums with fixed, hardcoded messages
+/// and no interpolated/dynamic content, so trusting their own
+/// `errorDescription` cannot leak anything. Any other error type is treated
+/// as unexpected and never inspected for its message/description, so no
+/// credential, ARN, command, stderr, prompt, or response-body text it might
+/// carry can reach a log or the UI.
 struct SafeErrorPresenter {
     let writeDiagnostic: (String) -> Void
 
@@ -33,6 +36,22 @@ struct SafeErrorPresenter {
             return SafeErrorPresentation(
                 diagnosticCode: clientError.diagnosticCode,
                 userMessage: clientError.errorDescription ?? clientError.diagnosticCode
+            )
+        }
+
+        if let transcriberError = error as? TranscriberError {
+            writeDiagnostic("AppDelegate.fail code=\(transcriberError.diagnosticCode)")
+            return SafeErrorPresentation(
+                diagnosticCode: transcriberError.diagnosticCode,
+                userMessage: transcriberError.errorDescription ?? transcriberError.diagnosticCode
+            )
+        }
+
+        if let appDelegateError = error as? AppDelegateError {
+            writeDiagnostic("AppDelegate.fail code=\(appDelegateError.diagnosticCode)")
+            return SafeErrorPresentation(
+                diagnosticCode: appDelegateError.diagnosticCode,
+                userMessage: appDelegateError.errorDescription ?? appDelegateError.diagnosticCode
             )
         }
 

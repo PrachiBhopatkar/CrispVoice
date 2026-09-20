@@ -273,4 +273,41 @@ final class SafeErrorPresenterTests: XCTestCase {
         XCTAssertFalse(presentation.userMessage.isEmpty)
         XCTAssertTrue(presentation.userMessage.contains("401"))
     }
+
+    // MARK: - TranscriberError (trusted: closed, fixed-message, no associated data)
+
+    func test_present_everyTranscriberErrorCase_restoresItsOwnSpecificMessage_notTheGenericFallback() {
+        let cases: [(TranscriberError, String)] = [
+            (.speechRecognitionNotAuthorized, "speech_recognition_not_authorized"),
+            (.recognizerUnavailable, "recognizer_unavailable"),
+            (.onDeviceRecognitionUnavailable, "on_device_recognition_unavailable"),
+            (.noTranscript, "no_transcript"),
+        ]
+
+        for (error, expectedCode) in cases {
+            var writes: [String] = []
+            let presenter = SafeErrorPresenter(writeDiagnostic: { writes.append($0) })
+
+            let presentation = presenter.present(error)
+
+            XCTAssertEqual(writes, ["AppDelegate.fail code=\(expectedCode)"])
+            XCTAssertEqual(presentation.diagnosticCode, expectedCode)
+            XCTAssertEqual(presentation.userMessage, error.errorDescription)
+            XCTAssertNotEqual(presentation.userMessage, "Something went wrong. Please try again.")
+        }
+    }
+
+    // MARK: - AppDelegateError (trusted: closed, fixed-message, no associated data)
+
+    func test_present_microphoneAccessDenied_restoresItsOwnSpecificMessage_notTheGenericFallback() {
+        var writes: [String] = []
+        let presenter = SafeErrorPresenter(writeDiagnostic: { writes.append($0) })
+
+        let presentation = presenter.present(AppDelegateError.microphoneAccessDenied)
+
+        XCTAssertEqual(writes, ["AppDelegate.fail code=microphone_access_denied"])
+        XCTAssertEqual(presentation.diagnosticCode, "microphone_access_denied")
+        XCTAssertEqual(presentation.userMessage, AppDelegateError.microphoneAccessDenied.errorDescription)
+        XCTAssertNotEqual(presentation.userMessage, "Something went wrong. Please try again.")
+    }
 }
