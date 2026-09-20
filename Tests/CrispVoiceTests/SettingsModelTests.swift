@@ -627,4 +627,107 @@ final class SettingsModelTests: XCTestCase {
             XCTAssertEqual(error as? RewriteProviderError, .invalidResponse)
         }
     }
+
+    // MARK: - Task 8: provider-specific Settings UI state (pure model assertions)
+
+    func test_bedrockPreset_resolvesToOpusModelID() {
+        let model = makeModel(defaults: freshDefaults(), keychain: makeKeychainStore())
+
+        model.bedrockModelOption = .opus48US
+
+        XCTAssertEqual(model.bedrockResolvedModelID, "us.anthropic.claude-opus-4-8")
+        XCTAssertEqual(model.bedrockResolvedModelID, BedrockModelOption.opus48USModelID)
+        XCTAssertFalse(model.isBedrockCustomModelSelected)
+    }
+
+    func test_bedrockCustom_revealsAndUsesCustomID_preservingInternalCharacters() {
+        let model = makeModel(defaults: freshDefaults(), keychain: makeKeychainStore())
+        let arn = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/AbC-123_XYZ.profile"
+
+        model.bedrockModelOption = .custom(arn)
+        model.bedrockCustomModelID = arn
+
+        XCTAssertTrue(model.isBedrockCustomModelSelected)
+        XCTAssertEqual(model.bedrockResolvedModelID, arn, "internal characters of a custom identifier must never be rewritten")
+    }
+
+    func test_bedrockProfile_displaysDefaultCapitalized_whileResolvingToLowercaseDefault() {
+        let model = makeModel(defaults: freshDefaults(), keychain: makeKeychainStore())
+
+        model.bedrockProfileName = "   "
+        XCTAssertEqual(model.bedrockProfileDisplayValue, "Default")
+        XCTAssertEqual(model.bedrockResolvedProfileName, "default")
+
+        model.bedrockProfileName = "work"
+        XCTAssertEqual(model.bedrockProfileDisplayValue, "work")
+        XCTAssertEqual(model.bedrockResolvedProfileName, "work")
+    }
+
+    func test_bedrockCrossRegionDisclosure_isPresent_andRemainsAGeneralWarning_forPresetAndCustom() {
+        let model = makeModel(defaults: freshDefaults(), keychain: makeKeychainStore())
+
+        model.bedrockModelOption = .opus48US
+        let presetDisclosure = model.bedrockCrossRegionDisclosureText
+        XCTAssertFalse(presetDisclosure.isEmpty)
+        XCTAssertTrue(presetDisclosure.localizedCaseInsensitiveContains("Region"))
+
+        model.bedrockModelOption = .custom("company.custom-inference-profile")
+        model.bedrockCustomModelID = "company.custom-inference-profile"
+        let customDisclosure = model.bedrockCrossRegionDisclosureText
+
+        XCTAssertEqual(
+            presetDisclosure,
+            customDisclosure,
+            "the cross-Region disclosure must remain a general warning, not one worded only for the Opus 4.8 preset"
+        )
+    }
+
+    func test_isBedrockDraftLocallyComplete_reflectsRegionAndModelPresence() {
+        let model = makeModel(defaults: freshDefaults(), keychain: makeKeychainStore())
+        model.selectedProvider = .bedrock
+
+        model.bedrockRegion = ""
+        model.bedrockModelOption = .opus48US
+        XCTAssertFalse(model.isBedrockDraftLocallyComplete)
+
+        model.bedrockRegion = "us-west-2"
+        XCTAssertTrue(model.isBedrockDraftLocallyComplete)
+
+        model.bedrockModelOption = .custom("")
+        model.bedrockCustomModelID = "   "
+        XCTAssertFalse(model.isBedrockDraftLocallyComplete)
+
+        model.bedrockCustomModelID = "company.model"
+        XCTAssertTrue(model.isBedrockDraftLocallyComplete)
+    }
+
+    func test_testConnection_bedrockPresetSuccess_reportsProviderRegionAndOpusLabel_withoutAWSIdentity() async {
+        let model = makeModel(defaults: freshDefaults(), keychain: makeKeychainStore())
+        model.selectedProvider = .bedrock
+        model.bedrockRegion = "us-west-2"
+        model.bedrockModelOption = .opus48US
+
+        await model.testConnection()
+
+        XCTAssertTrue(model.validationMessage.contains("Amazon Bedrock"))
+        XCTAssertTrue(model.validationMessage.contains("us-west-2"))
+        XCTAssertTrue(model.validationMessage.contains("Claude Opus 4.8 (US)"))
+    }
+
+    func test_testConnection_bedrockCustomSuccess_saysCustomModel_neverEchoesARNOrAccountIDOutsideItsField() async {
+        let model = makeModel(defaults: freshDefaults(), keychain: makeKeychainStore())
+        let arn = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-app-profile"
+        model.selectedProvider = .bedrock
+        model.bedrockRegion = "us-east-1"
+        model.bedrockModelOption = .custom(arn)
+        model.bedrockCustomModelID = arn
+
+        await model.testConnection()
+
+        XCTAssertTrue(model.validationMessage.contains("Custom model"))
+        XCTAssertFalse(model.validationMessage.contains(arn))
+        XCTAssertFalse(model.validationMessage.contains("123456789012"))
+        // The ARN remains available in its own editable Settings field...
+        XCTAssertEqual(model.bedrockCustomModelID, arn)
+    }
 }

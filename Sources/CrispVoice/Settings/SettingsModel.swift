@@ -119,6 +119,86 @@ final class SettingsModel: ObservableObject {
         }
     }
 
+    // MARK: - Bedrock UI-state (pure, presentation-only; no persistence)
+
+    /// Whether the Bedrock model picker currently has "Custom…" selected.
+    /// The Settings view uses this to decide whether to reveal the custom
+    /// identifier field (design section 6/7).
+    var isBedrockCustomModelSelected: Bool {
+        if case .custom = bedrockModelOption {
+            return true
+        }
+        return false
+    }
+
+    /// The exact Bedrock Runtime model/inference-profile identifier the
+    /// current drafts resolve to. Exposes `effectiveBedrockModelID` for
+    /// display (e.g. "Resolved model ID: …") without changing its
+    /// persistence-time behavior.
+    var bedrockResolvedModelID: String {
+        effectiveBedrockModelID
+    }
+
+    /// The user-facing label for the currently selected Bedrock model
+    /// option. Deliberately never includes the opaque custom identifier
+    /// itself (which may be an ARN containing an AWS account ID) — only
+    /// "Custom model" is ever shown for that case (design section 7/11).
+    var bedrockModelDisplayLabel: String {
+        switch bedrockModelOption {
+        case .opus48US:
+            return "Claude Opus 4.8 (US)"
+        case .custom:
+            return "Custom model"
+        }
+    }
+
+    /// The AWS profile name to *display* when the draft is blank/whitespace
+    /// — a presentation-only label. The value actually persisted/used for
+    /// requests is always the lowercase `default` (see
+    /// `bedrockResolvedProfileName`, `Preferences.bedrockProfileName`, and
+    /// `BedrockConfiguration`'s own normalization).
+    var bedrockProfileDisplayValue: String {
+        let trimmed = bedrockProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Default" : trimmed
+    }
+
+    /// The AWS profile name Test Connection/Save actually resolve to for
+    /// the current draft.
+    var bedrockResolvedProfileName: String {
+        Self.normalizedBedrockProfileName(bedrockProfileName)
+    }
+
+    /// A general cross-Region routing disclosure. Identical regardless of
+    /// whether the Opus 4.8 (US) preset or a custom inference profile is
+    /// selected — AWS may route content beyond the configured source
+    /// Region for any geographic, global, or application inference
+    /// profile, not only the preset (design section 6/7).
+    var bedrockCrossRegionDisclosureText: String {
+        "The configured Region is the source endpoint. Depending on the selected model or inference profile, AWS may route prompt and response content to other AWS-documented destination Regions for that profile."
+    }
+
+    /// Whether the current Bedrock drafts have enough local information for
+    /// Test Connection to be worth attempting — a cheap, non-throwing mirror
+    /// of `BedrockConfiguration`'s required fields (Region and model must be
+    /// non-blank after trimming). Used only to enable/disable the Test
+    /// button; it performs no normalization and never mutates state.
+    var isBedrockDraftLocallyComplete: Bool {
+        guard !bedrockRegion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        switch bedrockModelOption {
+        case .opus48US:
+            return true
+        case .custom:
+            return !bedrockCustomModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private static func normalizedBedrockProfileName(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "default" : trimmed
+    }
+
     /// Uses only the current in-memory drafts and the injected tester.
     /// Never persists anything to `UserDefaults`/Keychain, whether the
     /// probe succeeds or fails.
@@ -136,11 +216,15 @@ final class SettingsModel: ObservableObject {
                     return
                 }
                 try await connectionTester.testAnthropic(apiKey: key, model: anthropicModelName)
+                validationMessage = "✅ Connection succeeded."
             case .bedrock:
                 let configuration = try makeBedrockConfiguration()
                 try await connectionTester.testBedrock(configuration: configuration)
+                // Reports provider, Region, and model label only — never
+                // the AWS profile/account or an opaque custom identifier
+                // (design section 7/11).
+                validationMessage = "✅ Connection succeeded. \(RewriteProvider.bedrock.title) (\(configuration.region)) using \(bedrockModelDisplayLabel)."
             }
-            validationMessage = "✅ Connection succeeded."
         } catch {
             validationMessage = Self.safeMessage(for: error)
         }
