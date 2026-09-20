@@ -228,4 +228,49 @@ final class SafeErrorPresenterTests: XCTestCase {
         XCTAssertTrue(invalidModel.userMessage.contains("Region"))
         XCTAssertTrue(invalidModel.userMessage.localizedCaseInsensitiveContains("model"))
     }
+
+    // MARK: - AnthropicClient.ClientError
+
+    /// A synthetic Anthropic response body shaped like a real failure,
+    /// including an API-key-looking fragment and free-form server text.
+    /// None of this must ever reach a diagnostic write or the user message.
+    private static let secretLadenAnthropicBody = """
+    {"error":{"type":"authentication_error","message":"invalid x-api-key: sk-ant-api03-FAKEFAKEFAKEFAKEFAKEFAKEFAKE"}}
+    """
+
+    func test_present_anthropicClientError_writesOnlyAStableCategory_neverTheRawBody() {
+        let cases: [(AnthropicClient.ClientError, String)] = [
+            (.http(401, Self.secretLadenAnthropicBody), "anthropic_authentication_error"),
+            (.http(403, Self.secretLadenAnthropicBody), "anthropic_authentication_error"),
+            (.http(429, Self.secretLadenAnthropicBody), "anthropic_throttled"),
+            (.http(500, Self.secretLadenAnthropicBody), "anthropic_server_error"),
+            (.http(400, Self.secretLadenAnthropicBody), "anthropic_request_error"),
+            (.badResponse, "anthropic_invalid_response"),
+        ]
+
+        for (error, expectedCode) in cases {
+            var writes: [String] = []
+            let presenter = SafeErrorPresenter(writeDiagnostic: { writes.append($0) })
+
+            let presentation = presenter.present(error)
+
+            XCTAssertEqual(writes, ["AppDelegate.fail code=\(expectedCode)"])
+            XCTAssertEqual(presentation.diagnosticCode, expectedCode)
+            assertNeverLeaksSecretPayload(presentation.userMessage)
+            for write in writes {
+                assertNeverLeaksSecretPayload(write)
+            }
+            XCTAssertFalse(presentation.userMessage.contains("sk-ant-api03"))
+            XCTAssertFalse(presentation.userMessage.contains("authentication_error\":\"invalid"))
+        }
+    }
+
+    func test_present_anthropicClientError_returnsAnActionableNonEmptyUserMessage() {
+        let presenter = SafeErrorPresenter(writeDiagnostic: { _ in })
+
+        let presentation = presenter.present(AnthropicClient.ClientError.http(401, Self.secretLadenAnthropicBody))
+
+        XCTAssertFalse(presentation.userMessage.isEmpty)
+        XCTAssertTrue(presentation.userMessage.contains("401"))
+    }
 }

@@ -122,9 +122,38 @@ final class AnthropicClientTests: XCTestCase {
         }
     }
 
-    func test_clientError_localizedDescriptionIncludesHTTPStatusAndMessage() {
-        let error = AnthropicClient.ClientError.http(401, "invalid_api_key: bad key")
+    func test_clientError_http_stillCarriesTheRawBody_forImmediateSettingsHandling() {
+        // The raw, untrusted response body may still be represented inside
+        // the case's associated value, but nothing in `errorDescription` (or
+        // any other display/log path) may ever read it back out — see the
+        // tests below.
+        guard case .http(let statusCode, let message) = AnthropicClient.ClientError.http(401, "invalid_api_key: bad key") else {
+            return XCTFail("expected .http case")
+        }
+        XCTAssertEqual(statusCode, 401)
+        XCTAssertEqual(message, "invalid_api_key: bad key")
+    }
 
-        XCTAssertEqual(error.localizedDescription, "Anthropic request failed (HTTP 401): invalid_api_key: bad key")
+    func test_clientError_errorDescription_includesHTTPStatusButNeverTheRawBody() throws {
+        let error = AnthropicClient.ClientError.http(401, "invalid_api_key: this-is-a-fake-secret-fragment")
+
+        let description = try XCTUnwrap(error.errorDescription)
+        XCTAssertTrue(description.contains("401"))
+        XCTAssertFalse(description.contains("invalid_api_key"))
+        XCTAssertFalse(description.contains("this-is-a-fake-secret-fragment"))
+    }
+
+    func test_clientError_diagnosticCode_isAStableCategoryDerivedOnlyFromStatusCode() {
+        XCTAssertEqual(AnthropicClient.ClientError.http(401, "anything").diagnosticCode, "anthropic_authentication_error")
+        XCTAssertEqual(AnthropicClient.ClientError.http(403, "anything").diagnosticCode, "anthropic_authentication_error")
+        XCTAssertEqual(AnthropicClient.ClientError.http(429, "anything").diagnosticCode, "anthropic_throttled")
+        XCTAssertEqual(AnthropicClient.ClientError.http(500, "anything").diagnosticCode, "anthropic_server_error")
+        XCTAssertEqual(AnthropicClient.ClientError.http(529, "anything").diagnosticCode, "anthropic_server_error")
+        XCTAssertEqual(AnthropicClient.ClientError.http(400, "anything").diagnosticCode, "anthropic_request_error")
+        XCTAssertEqual(AnthropicClient.ClientError.badResponse.diagnosticCode, "anthropic_invalid_response")
+    }
+
+    func test_clientError_badResponse_errorDescriptionIsFixedAndGeneric() {
+        XCTAssertEqual(AnthropicClient.ClientError.badResponse.errorDescription, "Anthropic returned an unexpected response.")
     }
 }

@@ -303,13 +303,16 @@ final class SettingsModel: ObservableObject {
         )
     }
 
+    /// Delegates to the same `SafeErrorPresenter` seam `AppDelegate` uses,
+    /// so Settings' error display and `DebugLog`'s content-free logging stay
+    /// in lockstep with a single translation: `RewriteProviderError` and
+    /// `AnthropicClient.ClientError` get their fixed, status/category-only
+    /// safe message (never a raw AWS/Anthropic error, credential, or server
+    /// body); anything else gets a generic message. `writeDiagnostic` is a
+    /// no-op here — Settings' own validation/test-connection UI is not an
+    /// application failure path and does not write to `DebugLog`.
     private static func safeMessage(for error: Error) -> String {
-        if let providerError = error as? RewriteProviderError {
-            return "❌ \(providerError.errorDescription ?? "Something went wrong. Please try again.")"
-        }
-        if let clientError = error as? AnthropicClient.ClientError {
-            return "❌ \(clientError.errorDescription ?? "Something went wrong. Please try again.")"
-        }
-        return "❌ Something went wrong. Please try again."
+        let presentation = SafeErrorPresenter(writeDiagnostic: { _ in }).present(error)
+        return "❌ \(presentation.userMessage)"
     }
 }

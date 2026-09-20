@@ -1,14 +1,5 @@
 import SwiftUI
 
-extension Notification.Name {
-    // Transitional: `AppDelegate` still observes this name to refresh its
-    // cached Anthropic key. Task 9 rewires `AppDelegate` onto the
-    // content-free `.crispVoiceRewriteConfigurationDidChange` notification
-    // (declared in `SettingsModel.swift`) and removes this one. Nothing in
-    // this file posts it anymore.
-    static let crispVoiceAPIKeyDidChange = Notification.Name("CrispVoiceAPIKeyDidChange")
-}
-
 /// The Bedrock Settings model picker's two entries. This is purely a view
 /// concern: `SettingsModel.bedrockModelOption` (the actual draft, from Task
 /// 3/7) already distinguishes the preset from an arbitrary custom
