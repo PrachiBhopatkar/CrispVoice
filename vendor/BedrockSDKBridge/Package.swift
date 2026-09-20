@@ -16,7 +16,8 @@ let package = Package(
             dependencies: [
                 .product(name: "AWSBedrockRuntime", package: "aws-sdk-swift"),
                 .product(name: "AWSSDKIdentity", package: "aws-sdk-swift")
-            ]
+            ],
+            swiftSettings: [.unsafeFlags(["-enable-library-evolution"])]
         ),
         .testTarget(
             name: "BedrockSDKBridgeTests",

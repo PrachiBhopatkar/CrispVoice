@@ -1,4 +1,5 @@
 import Foundation
+import BedrockSDKBridge
 
 /// A closed, app-owned safe error enum shared by every rewrite provider.
 ///
@@ -53,6 +54,23 @@ enum RewriteProviderError: LocalizedError, Equatable {
             return "A network connection failure prevented the request from completing. Please try again."
         case .invalidResponse:
             return "The rewrite provider returned an invalid or empty response. Please try again."
+        }
+    }
+}
+
+extension RewriteProviderError {
+    /// Translates the Bedrock vendor package's closed error surface into
+    /// this app-owned error. `BridgedBedrockError` itself carries no raw
+    /// SDK/error text (see `vendor/BedrockSDKBridge`), so this mapping
+    /// cannot leak anything beyond the stable classification.
+    init(bridged: BridgedBedrockError) {
+        switch bridged {
+        case .credentialsUnavailable: self = .credentialsUnavailable
+        case .accessDenied: self = .accessDenied
+        case .invalidModelOrRegion: self = .invalidModelOrRegion
+        case .throttled: self = .throttled
+        case .network: self = .network
+        case .invalidResponse: self = .invalidResponse
         }
     }
 }
