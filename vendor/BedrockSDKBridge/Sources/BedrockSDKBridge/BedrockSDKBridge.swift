@@ -58,23 +58,11 @@ public struct BridgedBedrockClient {
     /// Builds the real AWS-backed client. SDK HTTP/body logging is
     /// explicitly disabled (`clientLogMode: .none`); credential refresh is
     /// owned by the SDK's resolver/client, never re-triggered per rewrite.
+    /// Always resolves the standard `~/.aws/config`/`~/.aws/credentials`
+    /// files (see the internal `configFilePath`/`credentialsFilePath`
+    /// overload below, used only by tests).
     public init(configuration: BridgedBedrockConfiguration) throws {
-        do {
-            let resolver = ProfileAWSCredentialIdentityResolver(profileName: configuration.profileName)
-            let config = try BedrockRuntimeClient.BedrockRuntimeClientConfig(
-                awsCredentialIdentityResolver: resolver,
-                region: configuration.region,
-                // Explicitly typed (not bare `.none`) to avoid resolving to
-                // `Optional<ClientLogMode>.none` (nil, which would fall back
-                // to the SDK's own default log mode instead of disabling
-                // HTTP/body logging).
-                clientLogMode: ClientRuntime.ClientLogMode.none
-            )
-            let client = BedrockRuntimeClient(config: config)
-            self.init(modelID: configuration.modelID, caller: client)
-        } catch {
-            throw BedrockErrorMapper.map(error)
-        }
+        try self.init(configuration: configuration, configFilePath: nil, credentialsFilePath: nil)
     }
 
     public func complete(system: String, user: String, maxTokens: Int) async throws -> String {
@@ -123,5 +111,41 @@ public struct BridgedBedrockClient {
         }
 
         return text
+    }
+}
+
+extension BridgedBedrockClient {
+    /// Test-only seam: explicitly overrides the AWS config and shared
+    /// credentials file paths passed to `ProfileAWSCredentialIdentityResolver`,
+    /// so contract tests can point the SDK's own profile resolver at a
+    /// private, temporary AWS profile instead of the real
+    /// `~/.aws/config`/`~/.aws/credentials`. `profileName` is always
+    /// passed explicitly; nothing here reads `AWS_PROFILE`.
+    ///
+    /// The production `public init(configuration:)` calls this with both
+    /// arguments `nil`, which the SDK resolves to the standard files --
+    /// this overload changes only where the resolver looks, never the
+    /// production default.
+    init(configuration: BridgedBedrockConfiguration, configFilePath: String?, credentialsFilePath: String?) throws {
+        do {
+            let resolver = ProfileAWSCredentialIdentityResolver(
+                profileName: configuration.profileName,
+                configFilePath: configFilePath,
+                credentialsFilePath: credentialsFilePath
+            )
+            let config = try BedrockRuntimeClient.BedrockRuntimeClientConfig(
+                awsCredentialIdentityResolver: resolver,
+                region: configuration.region,
+                // Explicitly typed (not bare `.none`) to avoid resolving to
+                // `Optional<ClientLogMode>.none` (nil, which would fall back
+                // to the SDK's own default log mode instead of disabling
+                // HTTP/body logging).
+                clientLogMode: ClientRuntime.ClientLogMode.none
+            )
+            let client = BedrockRuntimeClient(config: config)
+            self.init(modelID: configuration.modelID, caller: client)
+        } catch {
+            throw BedrockErrorMapper.map(error)
+        }
     }
 }

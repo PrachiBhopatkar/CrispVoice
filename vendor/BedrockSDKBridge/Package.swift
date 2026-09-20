@@ -21,7 +21,8 @@ let package = Package(
         ),
         .testTarget(
             name: "BedrockSDKBridgeTests",
-            dependencies: ["BedrockSDKBridge"]
+            dependencies: ["BedrockSDKBridge"],
+            exclude: ["Fixtures/credential-process-fixture.sh"]
         )
     ]
 )
