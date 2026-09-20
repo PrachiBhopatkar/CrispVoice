@@ -115,8 +115,8 @@ CrispVoice handles a different moment: **you already have the context, and you n
 - Multiple message variants for different ways to express the same intent
 - Direct, Warmer, and Formal tone controls
 - Application-independent delivery through the macOS clipboard
-- Bring your own Anthropic API key
-- API key storage in macOS Keychain
+- Bring your own Anthropic API key, or connect through Amazon Bedrock using your organization's AWS identity
+- Anthropic API key storage in macOS Keychain; Amazon Bedrock uses your existing AWS profile and stores no AWS credentials
 - No platform-specific bots, plugins, OAuth flows, or developer server
 - User-controlled sending so nothing is posted automatically
 
@@ -126,13 +126,13 @@ CrispVoice has no developer-operated backend.
 
 - Audio is processed on your Mac and never uploaded.
 - Speech recognition requires on-device Apple Speech support.
-- Dictated text is sent directly from your Mac to Anthropic only when it is rewritten.
-- Requests use your own Anthropic API key.
-- Your API key is stored in macOS Keychain.
+- Dictated text is sent directly from your Mac only when it is rewritten, to the rewrite provider you selected in Settings — never to CrispVoice's developer.
+  - **Anthropic API** — the request goes directly to `api.anthropic.com` using your own Anthropic API key, stored in macOS Keychain.
+  - **Amazon Bedrock** — the request goes directly to the configured AWS Bedrock Runtime endpoint using your AWS identity. Resolving that identity may contact AWS SSO/OIDC/STS endpoints or invoke your administrator-configured local `credential_process`; CrispVoice never stores AWS credentials.
 - CrispVoice does not proxy, store, or receive your messages.
 - No Slack, Microsoft, or email account access is required.
 
-The only content-bearing network request is the rewrite request sent directly to Anthropic.
+The only content-bearing network request is the rewrite request sent directly to your selected provider. See [docs/privacy.md](docs/privacy.md) for the full data-flow, IAM, and cross-Region details, and [docs/troubleshooting.md](docs/troubleshooting.md) if a provider fails to connect.
 
 ## Architecture
 
@@ -147,8 +147,8 @@ Apple Speech
 (on-device transcription)
       |
       v
-Anthropic Messages API
-(direct request using your key)
+Selected rewrite provider
+(Anthropic Messages API, or Amazon Bedrock Converse)
       |
       v
 Message variants and tone controls
@@ -177,10 +177,14 @@ This command downloads the latest public GitHub Release, verifies its checksum, 
 After installation:
 
 1. Grant Microphone, Speech Recognition, and Accessibility permissions.
-2. Add your Anthropic API key in CrispVoice Settings.
+2. In CrispVoice Settings, choose a rewrite provider:
+   - **Anthropic API** — add your Anthropic API key. It is stored in macOS Keychain.
+   - **Amazon Bedrock** — enter your AWS profile (leave blank to use `default`), AWS Region, and a model or inference-profile identifier. The `Claude Opus 4.8 (US)` preset resolves to the exact model ID `us.anthropic.claude-opus-4-8`; choose `Custom…` to enter another AWS-supported Claude model ID, inference-profile ID, or inference-profile ARN. CrispVoice authenticates using your existing AWS profile and never asks for an AWS access key ID, secret access key, session token, account ID, or user/identity ARN.
 3. Place the cursor in the application where you want to write.
 4. Press `Control + Option + C` to begin dictating.
 5. Press the hotkey again to stop and generate message variants.
+
+If Amazon Bedrock Test Connection fails, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Project Status
 
@@ -192,7 +196,7 @@ The current release is `v0.2.0`.
 
 - macOS 13 or later
 - A Mac and locale that support on-device Apple Speech recognition
-- An Anthropic API key
+- Either an Anthropic API key, or an AWS profile with access to a Claude model on Amazon Bedrock
 - Microphone, Speech Recognition, and Accessibility permissions
 
 ## Development
@@ -262,4 +266,4 @@ xcodebuild \
 - The developer should never receive user content or API keys.
 - The user should always review and send the final message.
 
-For more detail, see the [design specification](docs/superpowers/specs/2026-06-12-crispvoice-design.md).
+For more detail, see the [design specification](docs/superpowers/specs/2026-06-12-crispvoice-design.md) and the [Amazon Bedrock provider design](docs/superpowers/specs/2026-08-09-amazon-bedrock-provider-design.md). For data-flow and destination details, see [docs/privacy.md](docs/privacy.md). For setup and connection problems, see [docs/troubleshooting.md](docs/troubleshooting.md).
