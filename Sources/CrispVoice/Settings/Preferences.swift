@@ -77,17 +77,22 @@ final class Preferences {
     }
 
     /// The AWS Region used for Bedrock requests. Empty when not yet
-    /// configured; required before Bedrock can be activated.
+    /// configured; required before Bedrock can be activated. Only
+    /// leading/trailing whitespace is trimmed on write, matching
+    /// `BedrockConfiguration`'s own normalization.
     var bedrockRegion: String {
         get { defaults.string(forKey: Keys.bedrockRegion) ?? "" }
-        set { defaults.set(newValue, forKey: Keys.bedrockRegion) }
+        set { defaults.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Keys.bedrockRegion) }
     }
 
     /// The Bedrock model or inference-profile identifier. Defaults to the
-    /// Claude Opus 4.8 (US) preset when absent.
+    /// Claude Opus 4.8 (US) preset when absent. Only leading/trailing
+    /// whitespace is trimmed on write, matching `BedrockConfiguration`'s own
+    /// normalization; internal characters of a custom identifier are never
+    /// rewritten.
     var bedrockModelID: String {
         get { defaults.string(forKey: Keys.bedrockModelID) ?? BedrockModelOption.opus48USModelID }
-        set { defaults.set(newValue, forKey: Keys.bedrockModelID) }
+        set { defaults.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Keys.bedrockModelID) }
     }
 
     /// Builds a validated `BedrockConfiguration` from the current Bedrock

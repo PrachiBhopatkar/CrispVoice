@@ -420,6 +420,82 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(keychain.get(), "sk-existing")
     }
 
+    /// Exercises the real reversibility path end-to-end: provider A is
+    /// configured and actually saved, the draft is switched to provider B
+    /// with a valid configuration, and `save()` is called again. Unlike
+    /// `test_switchingDrafts_neverDeletesOtherProvidersData` (which only
+    /// mutates the in-memory draft and never calls `save()`), this proves
+    /// the on-disk guarantee for the path a user actually takes: activating
+    /// Bedrock must not touch the previously-saved Anthropic Keychain entry
+    /// or its `UserDefaults` values, and vice versa (design section 7:
+    /// "Switching to Bedrock does not delete the stored Anthropic key.
+    /// Switching back to Anthropic does not delete Bedrock configuration.").
+    func test_saveAfterSwitchingProvider_preservesThePreviouslyActiveProvidersPersistedData() {
+        let defaults = freshDefaults()
+        let keychain = makeKeychainStore()
+
+        // Step 1: configure and actually save Anthropic as the active provider.
+        let firstModel = makeModel(defaults: defaults, keychain: keychain)
+        firstModel.selectedProvider = .anthropic
+        firstModel.anthropicAPIKey = "sk-anthropic-persisted"
+        firstModel.anthropicModelName = "claude-sonnet-4-5-20250929"
+        firstModel.save()
+
+        XCTAssertEqual(keychain.get(), "sk-anthropic-persisted")
+        XCTAssertEqual(Preferences(defaults: defaults).rewriteProvider, .anthropic)
+
+        // Step 2: open a fresh model (as Settings reopening would), switch
+        // the draft to Bedrock with a valid configuration, and save.
+        let secondModel = makeModel(defaults: defaults, keychain: keychain)
+        secondModel.selectedProvider = .bedrock
+        secondModel.bedrockProfileName = "office"
+        secondModel.bedrockRegion = "us-west-2"
+        secondModel.bedrockModelOption = .opus48US
+        secondModel.save()
+
+        XCTAssertEqual(Preferences(defaults: defaults).rewriteProvider, .bedrock)
+
+        // The previously-active Anthropic provider's persisted data must
+        // still be intact even though it is no longer the active provider.
+        XCTAssertEqual(keychain.get(), "sk-anthropic-persisted")
+        XCTAssertEqual(Preferences(defaults: defaults).anthropicModelName, "claude-sonnet-4-5-20250929")
+    }
+
+    /// Symmetric case: Bedrock configured and saved first, then the draft
+    /// switches to Anthropic and saves — Bedrock's persisted configuration
+    /// must survive.
+    func test_saveAfterSwitchingProvider_symmetricCase_bedrockThenAnthropic_preservesBedrocksPersistedData() {
+        let defaults = freshDefaults()
+        let keychain = makeKeychainStore()
+
+        let firstModel = makeModel(defaults: defaults, keychain: keychain)
+        firstModel.selectedProvider = .bedrock
+        firstModel.bedrockProfileName = "office"
+        firstModel.bedrockRegion = "us-west-2"
+        firstModel.bedrockModelOption = .custom("company.custom-model")
+        firstModel.bedrockCustomModelID = "company.custom-model"
+        firstModel.save()
+
+        XCTAssertEqual(Preferences(defaults: defaults).rewriteProvider, .bedrock)
+        XCTAssertEqual(Preferences(defaults: defaults).bedrockProfileName, "office")
+        XCTAssertEqual(Preferences(defaults: defaults).bedrockRegion, "us-west-2")
+        XCTAssertEqual(Preferences(defaults: defaults).bedrockModelID, "company.custom-model")
+
+        let secondModel = makeModel(defaults: defaults, keychain: keychain)
+        secondModel.selectedProvider = .anthropic
+        secondModel.anthropicAPIKey = "sk-anthropic-now-active"
+        secondModel.anthropicModelName = "claude-haiku-4-5-20251001"
+        secondModel.save()
+
+        XCTAssertEqual(Preferences(defaults: defaults).rewriteProvider, .anthropic)
+
+        // The previously-active Bedrock provider's persisted configuration
+        // must still be intact even though it is no longer active.
+        XCTAssertEqual(Preferences(defaults: defaults).bedrockProfileName, "office")
+        XCTAssertEqual(Preferences(defaults: defaults).bedrockRegion, "us-west-2")
+        XCTAssertEqual(Preferences(defaults: defaults).bedrockModelID, "company.custom-model")
+    }
+
     // MARK: - Transactional Save: Keychain write ordering / partial failure
 
     func test_save_keychainThrows_leavesPreferencesAndActiveProviderUnchanged() {
