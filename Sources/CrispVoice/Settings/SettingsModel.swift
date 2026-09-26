@@ -84,6 +84,16 @@ final class SettingsModel: ObservableObject {
     private let prefs: Preferences
     private let connectionTester: RewriteConnectionTesting
 
+    /// The Anthropic key value loaded from Keychain at `init`. `save()` only
+    /// writes/deletes the Keychain entry when the current draft differs from
+    /// this — never unconditionally on every Save. This also protects
+    /// against `KeychainStore.get()` returning `nil` on any failure (not
+    /// only "key absent"): without this guard, a transient read failure at
+    /// Settings-open time would load an empty draft, and an unrelated
+    /// Bedrock-only Save could then delete a real, previously-saved
+    /// Anthropic key the user never touched.
+    private let loadedAnthropicAPIKey: String
+
     init(
         keychain: KeychainStore = KeychainStore(),
         prefs: Preferences = Preferences(),
@@ -97,7 +107,9 @@ final class SettingsModel: ObservableObject {
         self.connectionTester = connectionTester
 
         self.selectedProvider = prefs.rewriteProvider
-        self.anthropicAPIKey = keychain.get() ?? ""
+        let loadedKey = keychain.get() ?? ""
+        self.loadedAnthropicAPIKey = loadedKey
+        self.anthropicAPIKey = loadedKey
         self.anthropicModelName = prefs.anthropicModelName
         self.bedrockProfileName = prefs.bedrockProfileName
         self.bedrockRegion = prefs.bedrockRegion
@@ -254,10 +266,12 @@ final class SettingsModel: ObservableObject {
 
         do {
             let normalizedKey = normalizedAnthropicAPIKey
-            if normalizedKey.isEmpty {
-                try keychain.delete()
-            } else {
-                try keychain.set(normalizedKey)
+            if normalizedKey != loadedAnthropicAPIKey {
+                if normalizedKey.isEmpty {
+                    try keychain.delete()
+                } else {
+                    try keychain.set(normalizedKey)
+                }
             }
         } catch {
             validationMessage = "❌ Unable to save your Anthropic API key."
@@ -291,7 +305,7 @@ final class SettingsModel: ObservableObject {
         case .opus48US:
             return BedrockModelOption.opus48USModelID
         case .custom:
-            return bedrockCustomModelID
+            return BedrockModelOption.custom(bedrockCustomModelID).resolvedModelID
         }
     }
 

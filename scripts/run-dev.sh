@@ -26,6 +26,13 @@ else
   ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
   TOOL_DIR=""
   LAUNCH_TIMEOUT_ATTEMPTS=10
+
+  # CrispVoice links the vendored Amazon Bedrock SDK as a prebuilt static
+  # library (see AGENTS.md's Hard Invariants); build it first if it is
+  # missing so this fails with an actionable message instead of an
+  # xcodebuild link-time "no such module 'BedrockSDKBridge'" error.
+  [[ -f "$ROOT_DIR/vendor/lib/libBedrockSDKBridge.a" ]] \
+    || "$ROOT_DIR/scripts/build-bedrock-sdk-bridge.sh"
 fi
 
 APP_NAME="CrispVoice.app"

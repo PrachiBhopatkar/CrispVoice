@@ -8,12 +8,15 @@ import SwiftUI
 /// and trust it as a fourth safe-to-display error type.
 enum AppDelegateError: LocalizedError {
     case microphoneAccessDenied
+    case missingAnthropicAPIKey
 
     /// A stable diagnostic category safe to write to `DebugLog`.
     var diagnosticCode: String {
         switch self {
         case .microphoneAccessDenied:
             return "microphone_access_denied"
+        case .missingAnthropicAPIKey:
+            return "missing_anthropic_api_key"
         }
     }
 
@@ -21,6 +24,8 @@ enum AppDelegateError: LocalizedError {
         switch self {
         case .microphoneAccessDenied:
             return "Enable Microphone access for CrispVoice in System Settings to dictate."
+        case .missingAnthropicAPIKey:
+            return "Set your Anthropic API key in Settings to continue."
         }
     }
 }
@@ -304,6 +309,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
             settingsWindow = window
         }
+
+        // Rebuild the root view (and its @StateObject SettingsModel) on every
+        // open so a draft abandoned by closing without Save never reappears
+        // on the next open (design section 5.2: "Closing Settings without
+        // Save discards drafts"). Reusing the cached window/NSHostingController
+        // instance (rather than recreating the NSWindow) preserves its frame
+        // and other window-level state across opens.
+        settingsWindow?.contentViewController = NSHostingController(rootView: SettingsView())
 
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)

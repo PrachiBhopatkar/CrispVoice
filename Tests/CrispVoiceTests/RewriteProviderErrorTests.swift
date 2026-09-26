@@ -310,4 +310,20 @@ final class SafeErrorPresenterTests: XCTestCase {
         XCTAssertEqual(presentation.userMessage, AppDelegateError.microphoneAccessDenied.errorDescription)
         XCTAssertNotEqual(presentation.userMessage, "Something went wrong. Please try again.")
     }
+
+    func test_present_missingAnthropicAPIKey_restoresAnthropicSpecificMessage_notTheBedrockConfigurationMessage() {
+        var writes: [String] = []
+        let presenter = SafeErrorPresenter(writeDiagnostic: { writes.append($0) })
+
+        let presentation = presenter.present(AppDelegateError.missingAnthropicAPIKey)
+
+        XCTAssertEqual(writes, ["AppDelegate.fail code=missing_anthropic_api_key"])
+        XCTAssertEqual(presentation.diagnosticCode, "missing_anthropic_api_key")
+        XCTAssertEqual(presentation.userMessage, "Set your Anthropic API key in Settings to continue.")
+        XCTAssertNotEqual(
+            presentation.userMessage,
+            RewriteProviderError.missingConfiguration.errorDescription,
+            "A missing Anthropic key must never show the Bedrock-flavored missingConfiguration message"
+        )
+    }
 }

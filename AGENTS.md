@@ -20,6 +20,7 @@ The plan is the authoritative, ordered task list (Phases 0–3 = the MVP). Imple
 3. **Do NOT enable the App Sandbox.** The app needs Accessibility (keystroke synthesis) and direct distribution.
 4. **Never commit secrets or large binaries.** The Anthropic key lives only in the macOS Keychain (Phase 3) or a dev env var before that — never in source. `.gitignore` already excludes `*.bin`, `*.gguf`, `.env`, `*.key`, `Models/`, and build output. Respect it.
 5. **One commit per completed task**, using the commit message given in the plan's final step for that task.
+6. **Never invoke `xcodebuild` to compile any target inside the `aws-sdk-swift` package graph, directly or indirectly.** Xcode has a confirmed build-system regression where `SmithyCodeGeneratorPlugin`'s declared output files (e.g. `InternalAWSCognitoIdentity*.swift`) are not found by the compiler even after the plugin runs successfully and its trust dialog is accepted — verified independently of SDK version and of plugin trust state. Plain `swift build`/`swift test` (SwiftPM's own build system) compiles the identical dependency graph cleanly. `aws-sdk-swift` is therefore built only via `swift build`, in the separate `vendor/BedrockSDKBridge` package, and CrispVoice links the result as a prebuilt static library — never as a native Xcode SPM package dependency. `swift-create-xcframework` and similar tools are not used for this reason: they wrap `xcodebuild` internally and would reintroduce the same regression. `lipo` and plain file copies are fine — they operate on already-built binaries and invoke no build-tool plugin.
 
 ## Execution methodology — Subagent-Driven Development
 
@@ -78,6 +79,15 @@ A task is done only when ALL are true:
 # First-time toolchain
 brew install xcodegen
 ./scripts/download-model.sh base    # downloads Models/ggml-base.bin (gitignored)
+
+# Build the vendored Amazon Bedrock SDK static library. Required before the
+# first `xcodegen generate`/`xcodebuild`, again whenever
+# vendor/BedrockSDKBridge/Package.swift's pinned aws-sdk-swift version
+# changes, and again after any Xcode or Swift toolchain upgrade (the
+# prebuilt .swiftmodule is coupled to the compiler version, not just the SDK
+# version). Without this, xcodebuild fails at link time with
+# "no such module 'BedrockSDKBridge'". vendor/lib/ is gitignored.
+./scripts/build-bedrock-sdk-bridge.sh
 
 # Generate the Xcode project from project.yml (re-run after adding files)
 xcodegen generate

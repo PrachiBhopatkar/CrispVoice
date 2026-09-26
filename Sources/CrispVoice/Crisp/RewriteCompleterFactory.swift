@@ -30,15 +30,15 @@ struct RewriteCompleterFactory {
     }
 
     /// Builds the completer for `preferences.rewriteProvider`. Throws
-    /// `RewriteProviderError.missingConfiguration` when the active
-    /// provider's local requirements are absent (no Anthropic key
-    /// anywhere, or a blank Bedrock Region/model). Never mutates
-    /// `preferences` or Keychain.
+    /// `AppDelegateError.missingAnthropicAPIKey` when no Anthropic key is
+    /// available anywhere, or `RewriteProviderError.missingConfiguration`
+    /// when the active Bedrock configuration's local requirements (Region
+    /// or model) are blank. Never mutates `preferences` or Keychain.
     func make(preferences: Preferences) throws -> TextCompleter {
         switch preferences.rewriteProvider {
         case .anthropic:
             guard let apiKey = resolvedAnthropicAPIKey() else {
-                throw RewriteProviderError.missingConfiguration
+                throw AppDelegateError.missingAnthropicAPIKey
             }
             return makeAnthropic(apiKey, preferences.anthropicModelName)
         case .bedrock:

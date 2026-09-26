@@ -215,7 +215,9 @@ than as a native Xcode SPM dependency (Xcode's SPM plugin support has a
 build-system regression with `aws-sdk-swift`'s codegen plugin). Before running
 `xcodegen generate` for the first time, and again whenever
 `vendor/BedrockSDKBridge/Package.swift`'s pinned `aws-sdk-swift` version
-changes, build the vendored library:
+changes **and after any Xcode or Swift toolchain upgrade** (the prebuilt
+`.swiftmodule` is coupled to the compiler version that produced it, not just
+the pinned SDK version), build the vendored library:
 
 ```bash
 ./scripts/build-bedrock-sdk-bridge.sh

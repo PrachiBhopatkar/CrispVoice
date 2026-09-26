@@ -91,15 +91,20 @@ done
 info ""
 info "Sampling complete."
 
-# Extract unique ESTABLISHED remote destinations (address:port only —
-# never packet bodies). lsof's NAME column for a TCP socket looks like
+# Extract unique ESTABLISHED destination lines (full lsof line — command,
+# pid, user, fd/type, and the local/remote address pair — never packet
+# bodies). lsof's NAME column for a TCP socket looks like
 # "local_addr:local_port->remote_addr:remote_port (ESTABLISHED)".
-mapfile -t destinations < <(
-  awk '/->/ && /ESTABLISHED/ {
-    for (i = 1; i <= NF; i++) {
-      if ($i ~ /->/) { split($i, parts, "->"); print parts[2] }
-    }
-  }' "$SAMPLE_FILE" | sort -u
+#
+# `mapfile`/`readarray` are bash 4+ builtins and are NOT available in
+# macOS's shipped /bin/bash 3.2, so a plain `while read` loop is used
+# instead to stay compatible with the bash CrispVoice users actually run
+# this script under.
+destinations=()
+while IFS= read -r line; do
+  destinations+=("$line")
+done < <(
+  awk '/->/ && /ESTABLISHED/ { print }' "$SAMPLE_FILE" | sort -u
 )
 
 if [[ "${#destinations[@]}" -eq 0 ]]; then

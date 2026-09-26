@@ -109,7 +109,12 @@ final class RewriteCompleterFactoryTests: XCTestCase {
         XCTAssertEqual(capturedModels, ["claude-sonnet-4-5-20250929"])
     }
 
-    func test_anthropic_missingKeychainAndEnvironment_throwsMissingConfiguration() {
+    func test_anthropic_missingKeychainAndEnvironment_throwsMissingAnthropicAPIKey() {
+        // A missing Anthropic key must surface Anthropic-specific wording,
+        // not the Bedrock-flavored `RewriteProviderError.missingConfiguration`
+        // message ("Choose an AWS Region and model in Settings...") — that
+        // would be a user-facing regression on the default provider's most
+        // common path (fresh install, no key yet, press hotkey).
         let keychain = makeKeychainStore()
         let prefs = Preferences(defaults: freshDefaults())
         prefs.rewriteProvider = .anthropic
@@ -122,7 +127,15 @@ final class RewriteCompleterFactoryTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try factory.make(preferences: prefs)) { error in
-            XCTAssertEqual(error as? RewriteProviderError, .missingConfiguration)
+            guard let appDelegateError = error as? AppDelegateError else {
+                XCTFail("Expected AppDelegateError.missingAnthropicAPIKey, got \(error)")
+                return
+            }
+            XCTAssertEqual(appDelegateError.diagnosticCode, "missing_anthropic_api_key")
+            XCTAssertEqual(
+                appDelegateError.errorDescription,
+                "Set your Anthropic API key in Settings to continue."
+            )
         }
     }
 
