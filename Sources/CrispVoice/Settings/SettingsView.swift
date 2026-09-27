@@ -79,6 +79,11 @@ struct SettingsView: View {
                     model.pasteAnthropicAPIKey()
                 }
 
+                Button("Clear") {
+                    model.clearAnthropicAPIKey()
+                }
+                .disabled(model.anthropicAPIKey.isEmpty)
+
                 Button("Save") {
                     model.save()
                 }

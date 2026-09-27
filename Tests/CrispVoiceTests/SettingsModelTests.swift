@@ -185,6 +185,20 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertNil(keychain.get())
     }
 
+    func test_clearAnthropicAPIKey_emptiesTheDraft_withoutTouchingKeychainUntilSave() {
+        let defaults = freshDefaults()
+        let keychain = makeKeychainStore()
+        try? keychain.set("sk-ant-existing")
+        let model = makeModel(defaults: defaults, keychain: keychain)
+        XCTAssertEqual(model.anthropicAPIKey, "sk-ant-existing")
+
+        model.clearAnthropicAPIKey()
+
+        XCTAssertEqual(model.anthropicAPIKey, "")
+        // Draft-only: the persisted Keychain entry is untouched until Save.
+        XCTAssertEqual(keychain.get(), "sk-ant-existing")
+    }
+
     // MARK: - Close/cancel discards drafts
 
     func test_closeWithoutSave_thenNewModel_discardsDrafts() {

@@ -131,6 +131,14 @@ final class SettingsModel: ObservableObject {
         }
     }
 
+    /// Empties the draft only. The persisted Keychain entry is untouched
+    /// until Save — matching the transactional draft model (design section
+    /// 5.2). Save then deletes the persisted key because the normalized
+    /// draft is empty.
+    func clearAnthropicAPIKey() {
+        anthropicAPIKey = ""
+    }
+
     // MARK: - Bedrock UI-state (pure, presentation-only; no persistence)
 
     /// Whether the Bedrock model picker currently has "Custom…" selected.
