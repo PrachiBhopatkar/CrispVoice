@@ -4,7 +4,7 @@ You are implementing **CrispVoice**, a native macOS menu-bar app. Read this file
 
 ## What you're building (one paragraph)
 
-On a global hotkey, the app records the mic, transcribes **on-device** with `whisper.cpp` (via SwiftWhisper), rewrites the text into a crisp Slack message using the user's **own** Anthropic API key, and pastes the result into the focused Slack compose box (clipboard + synthesized ⌘V) so it posts **as the user**. No Slack app, no developer backend.
+On a global hotkey, the app records the mic, transcribes **on-device** with `whisper.cpp` (via SwiftWhisper), rewrites the text into a crisp Slack message through the user's selected Anthropic or Amazon Bedrock provider, and pastes the result into the focused Slack compose box (clipboard + synthesized ⌘V) so it posts **as the user**. No Slack app, no developer backend.
 
 ## Source of truth
 
@@ -15,11 +15,12 @@ The plan is the authoritative, ordered task list (Phases 0–3 = the MVP). Imple
 
 ## Hard invariants (never violate)
 
-1. **No developer backend, ever.** The only outbound network call the app makes is to `api.anthropic.com`, with the user's own key. No telemetry, analytics, or logging that contains audio, transcripts, or message text.
-2. **Privacy:** audio and transcripts never leave the device. Transcription is fully local (whisper.cpp).
+1. **No developer backend, ever.** The only content-bearing runtime request is the rewrite to the **user-selected Anthropic or Amazon Bedrock rewrite destination**: Anthropic content goes directly to `api.anthropic.com` with the user's key; Bedrock content goes directly to the configured Bedrock Runtime endpoint with the user's AWS identity. When Bedrock is selected, standard AWS profile authentication may contact AWS SSO/OIDC/STS endpoints or invoke an administrator-configured local `credential_process`; this non-content authentication traffic is initiated only for the explicitly selected standard AWS profile/provider. The credential process is outside CrispVoice's control, and CrispVoice never sends transcript or rewrite content to it. CrispVoice has no developer backend, proxy, telemetry, analytics, or content-bearing logging.
+2. **Privacy:** Audio never leaves the device, and Transcription remains local (whisper.cpp). AWS credentials are never stored by CrispVoice; the Anthropic key is Keychain-only in Phase 3 or a dev env var before that.
 3. **Do NOT enable the App Sandbox.** The app needs Accessibility (keystroke synthesis) and direct distribution.
 4. **Never commit secrets or large binaries.** The Anthropic key lives only in the macOS Keychain (Phase 3) or a dev env var before that — never in source. `.gitignore` already excludes `*.bin`, `*.gguf`, `.env`, `*.key`, `Models/`, and build output. Respect it.
 5. **One commit per completed task**, using the commit message given in the plan's final step for that task.
+6. **Never invoke `xcodebuild` to compile any target inside the `aws-sdk-swift` package graph, directly or indirectly.** Xcode has a confirmed build-system regression where `SmithyCodeGeneratorPlugin`'s declared output files (e.g. `InternalAWSCognitoIdentity*.swift`) are not found by the compiler even after the plugin runs successfully and its trust dialog is accepted — verified independently of SDK version and of plugin trust state. Plain `swift build`/`swift test` (SwiftPM's own build system) compiles the identical dependency graph cleanly. `aws-sdk-swift` is therefore built only via `swift build`, in the separate `vendor/BedrockSDKBridge` package, and CrispVoice links the result as a prebuilt static library — never as a native Xcode SPM package dependency. `swift-create-xcframework` and similar tools are not used for this reason: they wrap `xcodebuild` internally and would reintroduce the same regression. `lipo` and plain file copies are fine — they operate on already-built binaries and invoke no build-tool plugin.
 
 ## Execution methodology — Subagent-Driven Development
 
@@ -79,6 +80,15 @@ A task is done only when ALL are true:
 brew install xcodegen
 ./scripts/download-model.sh base    # downloads Models/ggml-base.bin (gitignored)
 
+# Build the vendored Amazon Bedrock SDK static library. Required before the
+# first `xcodegen generate`/`xcodebuild`, again whenever
+# vendor/BedrockSDKBridge/Package.swift's pinned aws-sdk-swift version
+# changes, and again after any Xcode or Swift toolchain upgrade (the
+# prebuilt .swiftmodule is coupled to the compiler version, not just the SDK
+# version). Without this, xcodebuild fails at link time with
+# "no such module 'BedrockSDKBridge'". vendor/lib/ is gitignored.
+./scripts/build-bedrock-sdk-bridge.sh
+
 # Generate the Xcode project from project.yml (re-run after adding files)
 xcodegen generate
 
@@ -102,4 +112,4 @@ The plan pins specific third-party APIs (SwiftWhisper's `transcribe(audioFrames:
 
 ## When the MVP is complete
 
-After Phase 3 passes, run the full suite, do the privacy smoke test (Task 3.6 — confirm the only outbound connection is `api.anthropic.com`), then push and tag `v0.1.0-mvp`. Phases 4 (notarized public release) and 5 (managed/marketplace) are out of scope here and will get their own plans.
+After Phase 3 passes, run the full suite, do the privacy smoke test (Task 3.6 — confirm content-bearing traffic goes directly only to the selected Anthropic or Bedrock provider endpoint, while AWS authentication traffic is non-content), then push and tag `v0.1.0-mvp`. Phases 4 (notarized public release) and 5 (managed/marketplace) are out of scope here and will get their own plans.

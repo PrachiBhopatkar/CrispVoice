@@ -4,6 +4,7 @@ import XCTest
 private final class PromptCapture {
     var systems: [String] = []
     var users: [String] = []
+    var maxTokens: [Int] = []
 }
 
 private enum StubError: Error, Equatable {
@@ -19,9 +20,10 @@ private final class SequencedCompleter: TextCompleter {
         self.capture = capture
     }
 
-    func complete(system: String, user: String) async throws -> String {
+    func complete(system: String, user: String, maxTokens: Int) async throws -> String {
         capture.systems.append(system)
         capture.users.append(user)
+        capture.maxTokens.append(maxTokens)
         guard !results.isEmpty else {
             XCTFail("unexpected completion request")
             throw StubError.transport
@@ -50,6 +52,7 @@ final class CrispEngineTests: XCTestCase {
         XCTAssertTrue(capture.systems[0].contains("exactly 2"))
         XCTAssertTrue(capture.users[0].contains("snd me teh deck"))
         XCTAssertTrue(capture.users[0].contains(Tone.neutral.instruction))
+        XCTAssertEqual(capture.maxTokens, [1024])
     }
 
     func test_crisp_retriesOnceAfterParseFailureAndReturnsSecondResult() async throws {
@@ -67,6 +70,7 @@ final class CrispEngineTests: XCTestCase {
         XCTAssertEqual(capture.users.count, 2)
         XCTAssertEqual(capture.users[0], capture.users[1])
         XCTAssertEqual(capture.systems[1], CrispPrompt.repairSystem(variantCount: 1))
+        XCTAssertEqual(capture.maxTokens, [1024, 1024])
     }
 
     func test_crisp_stopsAfterSecondParseFailureWithLocalizedError() async {
@@ -84,7 +88,7 @@ final class CrispEngineTests: XCTestCase {
             XCTAssertEqual(error, .invalidStructuredResponse)
             XCTAssertEqual(
                 error.localizedDescription,
-                "Anthropic returned invalid message variants twice. Please try again."
+                "Rewrite provider returned invalid message variants twice. Please try again."
             )
         } catch {
             XCTFail("unexpected error: \(error)")

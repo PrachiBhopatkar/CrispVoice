@@ -1,163 +1,188 @@
 import SwiftUI
-import AppKit
 
-extension Notification.Name {
-    static let crispVoiceAPIKeyDidChange = Notification.Name("CrispVoiceAPIKeyDidChange")
-}
+/// The Bedrock Settings model picker's two entries. This is purely a view
+/// concern: `SettingsModel.bedrockModelOption` (the actual draft, from Task
+/// 3/7) already distinguishes the preset from an arbitrary custom
+/// identifier — this type only drives which row the `Picker` highlights and
+/// whether the custom field is revealed. Selecting `.custom` here always
+/// carries the current `bedrockCustomModelID` draft along so the two stay
+/// in sync (design section 6/7).
+private enum BedrockModelSelection: Hashable, CaseIterable {
+    case opus48US
+    case custom
 
-@MainActor
-final class SettingsModel: ObservableObject {
-    struct ModelOption: Identifiable {
-        let id: String
-        let title: String
-    }
-
-    @Published var apiKey: String
-    @Published var modelName: String
-    @Published var variantCount: Int
-    @Published var validationMessage = ""
-    @Published var isTesting = false
-
-    let modelOptions: [ModelOption] = [
-        ModelOption(id: "claude-haiku-4-5-20251001", title: "Claude Haiku 4.5"),
-        ModelOption(id: "claude-sonnet-4-5-20250929", title: "Claude Sonnet 4.5")
-    ]
-
-    private let keychain: KeychainStore
-    private let prefs: Preferences
-
-    init(keychain: KeychainStore = KeychainStore(), prefs: Preferences = Preferences()) {
-        self.keychain = keychain
-        self.prefs = prefs
-        self.apiKey = keychain.get() ?? ""
-        self.modelName = prefs.modelName
-        self.variantCount = prefs.variantCount
-    }
-
-    func save() {
-        let normalizedKey = normalizedAPIKey()
-
-        do {
-            if normalizedKey.isEmpty {
-                try keychain.delete()
-            } else {
-                try keychain.set(normalizedKey)
-            }
-            prefs.modelName = modelName
-            prefs.variantCount = variantCount
-            validationMessage = ""
-            NotificationCenter.default.post(
-                name: .crispVoiceAPIKeyDidChange,
-                object: nil,
-                userInfo: ["apiKey": normalizedKey]
-            )
-        } catch {
-            validationMessage = "❌ Unable to save your API key."
+    var title: String {
+        switch self {
+        case .opus48US:
+            return "Claude Opus 4.8 (US)"
+        case .custom:
+            return "Custom…"
         }
-    }
-
-    func savePreferences() {
-        prefs.modelName = modelName
-        prefs.variantCount = variantCount
-    }
-
-    func pasteAPIKey() {
-        if let value = NSPasteboard.general.string(forType: .string) {
-            apiKey = value
-        }
-    }
-
-    func validate() async {
-        let normalizedKey = normalizedAPIKey()
-        guard !normalizedKey.isEmpty else {
-            validationMessage = "❌ Enter an API key first."
-            return
-        }
-
-        isTesting = true
-        defer { isTesting = false }
-
-        do {
-            let client = AnthropicClient(apiKey: normalizedKey, model: modelName)
-            _ = try await client.complete(system: "Reply with OK.", user: "ping", maxTokens: 5)
-            validationMessage = "✅ Key works."
-        } catch let error as AnthropicClient.ClientError {
-            switch error {
-            case .http(let statusCode, let message):
-                validationMessage = "❌ HTTP \(statusCode): \(message)"
-            case .badResponse:
-                validationMessage = "❌ Anthropic returned an unexpected response."
-            }
-        } catch {
-            validationMessage = "❌ \(error.localizedDescription)"
-        }
-    }
-
-    private func normalizedAPIKey() -> String {
-        apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
+/// The Settings form. A provider picker selects between Anthropic and
+/// Amazon Bedrock; everything below it is provider-specific. All edits here
+/// are drafts — nothing persists until Save is pressed (design section
+/// 5.2/7). `SettingsModel` owns every field and all validation; this view
+/// never eagerly persists anything itself (no `.onChange` writes).
 struct SettingsView: View {
     @StateObject private var model = SettingsModel()
 
     var body: some View {
         Form {
-            Section("Anthropic") {
-                SecureField("sk-ant-…", text: $model.apiKey)
-
-                HStack(spacing: 12) {
-                    Button("Paste") {
-                        model.pasteAPIKey()
+            Section("Provider") {
+                Picker("Rewrite Provider", selection: $model.selectedProvider) {
+                    ForEach(RewriteProvider.allCases) { provider in
+                        Text(provider.title).tag(provider)
                     }
-
-                    Button("Save") {
-                        model.save()
-                    }
-
-                    Button("Test") {
-                        Task { await model.validate() }
-                    }
-                    .disabled(model.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isTesting)
-
-                    if model.isTesting {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-
-                if !model.validationMessage.isEmpty {
-                    Text(model.validationMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
                 }
             }
 
-            Section("Rewrite") {
-                Picker("Model", selection: $model.modelName) {
-                    ForEach(model.modelOptions) { option in
-                        Text(option.title).tag(option.id)
-                    }
-                }
+            switch model.selectedProvider {
+            case .anthropic:
+                anthropicSection
+            case .bedrock:
+                bedrockSection
+            }
 
+            Section("Rewrite") {
                 Stepper(value: $model.variantCount, in: 1...5) {
                     Text("Variants: \(model.variantCount)")
                 }
 
-                Text("Transcription uses Apple Speech. These settings only affect the Anthropic rewrite step.")
+                Text("Transcription uses Apple Speech. These settings only affect the rewrite step. Select Save to apply changes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .padding(20)
-        .frame(minWidth: 420, maxWidth: 420, minHeight: 260)
-        .onChange(of: model.modelName) { _ in
-            model.savePreferences()
+        .frame(minWidth: 460, maxWidth: 460, minHeight: 260)
+    }
+
+    // MARK: - Anthropic
+
+    @ViewBuilder
+    private var anthropicSection: some View {
+        Section("Anthropic") {
+            SecureField("sk-ant-…", text: $model.anthropicAPIKey)
+
+            Picker("Model", selection: $model.anthropicModelName) {
+                ForEach(model.anthropicModelOptions) { option in
+                    Text(option.title).tag(option.id)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button("Paste") {
+                    model.pasteAnthropicAPIKey()
+                }
+
+                Button("Clear") {
+                    model.clearAnthropicAPIKey()
+                }
+                .disabled(model.anthropicAPIKey.isEmpty)
+
+                Button("Save") {
+                    model.save()
+                }
+
+                Button("Test") {
+                    Task { await model.testConnection() }
+                }
+                .disabled(model.anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isTesting)
+
+                if model.isTesting {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            validationMessageView
         }
-        .onChange(of: model.variantCount) { _ in
-            model.savePreferences()
+    }
+
+    // MARK: - Amazon Bedrock
+
+    @ViewBuilder
+    private var bedrockSection: some View {
+        Section("Amazon Bedrock") {
+            TextField("AWS Profile", text: $model.bedrockProfileName, prompt: Text(model.bedrockProfileDisplayValue))
+                .accessibilityHint("Leave blank to use the AWS profile named \"default\".")
+
+            TextField("AWS Region", text: $model.bedrockRegion, prompt: Text("us-west-2"))
+
+            Picker("Model", selection: bedrockModelSelection) {
+                ForEach(BedrockModelSelection.allCases, id: \.self) { selection in
+                    Text(selection.title).tag(selection)
+                }
+            }
+
+            if model.isBedrockCustomModelSelected {
+                TextField("Custom model or inference-profile ID", text: $model.bedrockCustomModelID)
+                    .accessibilityHint("Accepts a Bedrock model ID, inference-profile ID, or inference-profile ARN.")
+            }
+
+            Text("Resolved model ID: \(model.bedrockResolvedModelID)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            Text("CrispVoice authenticates using your selected AWS profile. It doesn't store an AWS access key.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text(model.bedrockCrossRegionDisclosureText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Button("Save") {
+                    model.save()
+                }
+
+                Button("Test") {
+                    Task { await model.testConnection() }
+                }
+                .disabled(model.isTesting || !model.isBedrockDraftLocallyComplete)
+
+                if model.isTesting {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            validationMessageView
+        }
+    }
+
+    /// Binding adapter between the view-only `BedrockModelSelection` and the
+    /// model's actual `BedrockModelOption` draft. Picking "Custom…" carries
+    /// the current custom-ID draft along so `model.bedrockModelOption` and
+    /// `model.bedrockCustomModelID` never disagree about which case is
+    /// active.
+    private var bedrockModelSelection: Binding<BedrockModelSelection> {
+        Binding(
+            get: { model.isBedrockCustomModelSelected ? .custom : .opus48US },
+            set: { newValue in
+                switch newValue {
+                case .opus48US:
+                    model.bedrockModelOption = .opus48US
+                case .custom:
+                    model.bedrockModelOption = .custom(model.bedrockCustomModelID)
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var validationMessageView: some View {
+        if !model.validationMessage.isEmpty {
+            Text(model.validationMessage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
         }
     }
 }

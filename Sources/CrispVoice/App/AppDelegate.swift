@@ -1,21 +1,36 @@
 import AppKit
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    private enum AppDelegateError: LocalizedError {
-        case missingAPIKey
-        case microphoneAccessDenied
+/// A closed, locally-authored error with a fixed, hardcoded message — no
+/// interpolated/dynamic content, same shape as `RewriteProviderError` and
+/// `AnthropicClient.ClientError`. Declared at module scope (rather than
+/// private/nested in `AppDelegate`) so `SafeErrorPresenter` can recognize
+/// and trust it as a fourth safe-to-display error type.
+enum AppDelegateError: LocalizedError {
+    case microphoneAccessDenied
+    case missingAnthropicAPIKey
 
-        var errorDescription: String? {
-            switch self {
-            case .missingAPIKey:
-                return "Set your Anthropic API key in Settings to continue."
-            case .microphoneAccessDenied:
-                return "Enable Microphone access for CrispVoice in System Settings to dictate."
-            }
+    /// A stable diagnostic category safe to write to `DebugLog`.
+    var diagnosticCode: String {
+        switch self {
+        case .microphoneAccessDenied:
+            return "microphone_access_denied"
+        case .missingAnthropicAPIKey:
+            return "missing_anthropic_api_key"
         }
     }
 
+    var errorDescription: String? {
+        switch self {
+        case .microphoneAccessDenied:
+            return "Enable Microphone access for CrispVoice in System Settings to dictate."
+        case .missingAnthropicAPIKey:
+            return "Set your Anthropic API key in Settings to continue."
+        }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private let appBundleIdentifier = Bundle.main.bundleIdentifier
@@ -25,9 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recorder = AudioRecorder()
     private var targetApp: NSRunningApplication?
     private let transcriber = Transcriber()
-    private let keychain = KeychainStore()
     private let prefs = Preferences()
-    private var cachedAPIKey: String?
+    private let completerFactory = RewriteCompleterFactory()
+    private let errorPresenter = SafeErrorPresenter(writeDiagnostic: DebugLog.write)
 
     private let model = SuggestionModel()
     private var panel: CapturePanel<SuggestionView>!
@@ -42,8 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DebugLog.write("AppDelegate.bundleIdentifier id=\(Bundle.main.bundleIdentifier ?? "nil")")
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleAPIKeyChanged(_:)),
-            name: .crispVoiceAPIKeyDidChange,
+            selector: #selector(handleRewriteConfigurationChanged(_:)),
+            name: .crispVoiceRewriteConfigurationDidChange,
             object: nil
         )
 
@@ -243,56 +258,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         app.bundleIdentifier == appBundleIdentifier
     }
 
+    /// The single failure boundary for every capture/transcribe/rewrite
+    /// error. `SafeErrorPresenter` is the only thing that ever writes a
+    /// diagnostic line here. It trusts only a closed set of locally-authored
+    /// error types with fixed, hardcoded messages (`RewriteProviderError`,
+    /// `AnthropicClient.ClientError`, `TranscriberError`, `AppDelegateError`)
+    /// and never inspects any other, untrusted error's own
+    /// message/description — so no provider value, profile, Region, model,
+    /// credential, transcript, or response can reach `DebugLog` or the UI
+    /// through this path.
     private func fail(_ error: Error) async {
-        DebugLog.write("AppDelegate.fail error=\(error.localizedDescription)")
+        let presentation = errorPresenter.present(error)
         await MainActor.run {
             self.model.isWorking = false
-            self.model.status = "Error: \(error.localizedDescription)"
+            self.model.status = "Error: \(presentation.userMessage)"
         }
     }
 
+    /// Builds a fresh completer for the currently active rewrite provider on
+    /// every call — there is no cached engine/API key to go stale, so a
+    /// Settings change always takes effect on the very next crisp request
+    /// without needing to inspect the change-notification's payload (it
+    /// carries none).
     private func makeEngine() throws -> CrispEngine {
-        guard let apiKey = currentAPIKey() else {
-            throw AppDelegateError.missingAPIKey
-        }
-
-        return CrispEngine(
-            completer: AnthropicClient(apiKey: apiKey, model: prefs.modelName),
+        CrispEngine(
+            completer: try completerFactory.make(preferences: prefs),
             variantCount: prefs.variantCount
         )
     }
 
-    private func currentAPIKey() -> String? {
-        if let cachedAPIKey, !cachedAPIKey.isEmpty {
-            DebugLog.write("AppDelegate.currentAPIKey usingCachedKey")
-            return cachedAPIKey
-        }
-
-        let storedKey = keychain.get()?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let storedKey, !storedKey.isEmpty {
-            DebugLog.write("AppDelegate.currentAPIKey usingKeychain")
-            cachedAPIKey = storedKey
-            return storedKey
-        }
-
-        let envKey = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let envKey, !envKey.isEmpty {
-            DebugLog.write("AppDelegate.currentAPIKey usingEnvironment")
-            cachedAPIKey = envKey
-            return envKey
-        }
-
-        DebugLog.write("AppDelegate.currentAPIKey missing")
-        return nil
-    }
-
+    /// Posted only after a successful Settings save, with no payload
+    /// (`object`/`userInfo` are always `nil`). Nothing here needs to read
+    /// the notification: `makeEngine()` above already re-resolves the
+    /// active provider, model, and credentials from `Preferences`/Keychain
+    /// on every call.
     @objc
-    private func handleAPIKeyChanged(_ notification: Notification) {
-        let updatedKey = notification.userInfo?["apiKey"] as? String
-        let normalized = updatedKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-        cachedAPIKey = (normalized?.isEmpty == false) ? normalized : nil
-        DebugLog.write("AppDelegate.handleAPIKeyChanged cached=\(cachedAPIKey != nil)")
+    private func handleRewriteConfigurationChanged(_ notification: Notification) {
+        DebugLog.write("AppDelegate.handleRewriteConfigurationChanged")
     }
 
     @objc private func openSettings() {
@@ -307,6 +309,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
             settingsWindow = window
         }
+
+        // Rebuild the root view (and its @StateObject SettingsModel) on every
+        // open so a draft abandoned by closing without Save never reappears
+        // on the next open (design section 5.2: "Closing Settings without
+        // Save discards drafts"). Reusing the cached window/NSHostingController
+        // instance (rather than recreating the NSWindow) preserves its frame
+        // and other window-level state across opens.
+        settingsWindow?.contentViewController = NSHostingController(rootView: SettingsView())
 
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)

@@ -80,6 +80,22 @@ enum TranscriberError: LocalizedError {
     case onDeviceRecognitionUnavailable
     case noTranscript
 
+    /// A stable diagnostic category safe to write to `DebugLog`. Like
+    /// `errorDescription` below, this is a fixed string per case — no
+    /// interpolated/dynamic content — so `SafeErrorPresenter` can trust it.
+    var diagnosticCode: String {
+        switch self {
+        case .speechRecognitionNotAuthorized:
+            return "speech_recognition_not_authorized"
+        case .recognizerUnavailable:
+            return "recognizer_unavailable"
+        case .onDeviceRecognitionUnavailable:
+            return "on_device_recognition_unavailable"
+        case .noTranscript:
+            return "no_transcript"
+        }
+    }
+
     var errorDescription: String? {
         switch self {
         case .speechRecognitionNotAuthorized:

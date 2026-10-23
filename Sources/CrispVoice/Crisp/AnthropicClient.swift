@@ -4,16 +4,49 @@ import Foundation
 /// machine with the user's own key - no backend in the path.
 final class AnthropicClient {
     enum ClientError: LocalizedError {
+        /// `message` is the raw, untrusted response body captured at the
+        /// point of failure. It exists on this case for completeness only —
+        /// `errorDescription` and `diagnosticCode` below are derived solely
+        /// from the non-secret HTTP status code, and no other code path may
+        /// read `message` back out for logging or display (see
+        /// `SafeErrorPresenter` and `SettingsModel.safeMessage`).
         case http(Int, String)
         case badResponse
 
+        /// A stable diagnostic category safe to write to `DebugLog`.
+        /// Derived only from the HTTP status code — never from the response
+        /// body text.
+        var diagnosticCode: String {
+            switch self {
+            case .http(let statusCode, _):
+                switch statusCode {
+                case 401, 403:
+                    return "anthropic_authentication_error"
+                case 429:
+                    return "anthropic_throttled"
+                case 500...599:
+                    return "anthropic_server_error"
+                default:
+                    return "anthropic_request_error"
+                }
+            case .badResponse:
+                return "anthropic_invalid_response"
+            }
+        }
+
         var errorDescription: String? {
             switch self {
-            case .http(let statusCode, let message):
-                if message.isEmpty {
+            case .http(let statusCode, _):
+                switch statusCode {
+                case 401, 403:
+                    return "Anthropic rejected the request due to an authentication or permission problem (HTTP \(statusCode)). Check your Anthropic API key in Settings."
+                case 429:
+                    return "Anthropic throttled this request (HTTP 429). Please try again in a moment."
+                case 500...599:
+                    return "Anthropic reported a server error (HTTP \(statusCode)). Please try again."
+                default:
                     return "Anthropic request failed (HTTP \(statusCode))."
                 }
-                return "Anthropic request failed (HTTP \(statusCode)): \(message)"
             case .badResponse:
                 return "Anthropic returned an unexpected response."
             }
@@ -91,4 +124,7 @@ final class AnthropicClient {
         }
         return text
     }
+}
+
+extension AnthropicClient: TextCompleter {
 }

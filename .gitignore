@@ -13,6 +13,7 @@ xcuserdata/
 .swiftpm/
 .build/
 Packages/
+vendor/lib/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 CrispVoice.xcodeproj/
 
