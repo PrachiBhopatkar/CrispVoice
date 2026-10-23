@@ -190,7 +190,7 @@ If Amazon Bedrock Test Connection fails, see [docs/troubleshooting.md](docs/trou
 
 CrispVoice is currently a macOS MVP. The core workflow includes global hotkey recording, live on-device transcription, Claude-powered rewriting, message variants, tone controls, secure API-key storage, permission guidance, and paste-back into the previously focused application.
 
-The current release is `v0.2.2`.
+The current release is `v0.3.0`.
 
 ## Requirements
 
