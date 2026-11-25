@@ -82,6 +82,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.onPick = { [weak self] text in self?.send(text) }
         model.onTone = { [weak self] tone in self?.rerun(tone: tone) }
         model.onRegenerate = { [weak self] in self?.rerun(tone: .neutral) }
+        model.onRetry = { [weak self] in self?.rerun(tone: .neutral) }
+        model.onClose = { [weak self] in self?.closePanel() }
+        model.onCopy = { [weak self] text in self?.copyToClipboard(text) }
 
         hotkeys.register { [weak self] in self?.toggle() }
 
@@ -133,10 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         targetApp = captureTargetApplication()
         DebugLog.write("AppDelegate.startCapture targetApp=\(targetApp?.bundleIdentifier ?? "nil")")
         lastTranscript = ""
-        model.transcript = ""
-        model.variants = []
-        model.isWorking = false
-        model.status = "Listening…"
+        model.resetForNewCapture()
         panel.present()
 
         Task { [weak self] in
@@ -205,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func rerun(tone: Tone) {
         guard !lastTranscript.isEmpty else { return }
+        model.hasFailed = false
         model.isWorking = true
         model.status = "Crisping…"
         Task { await runCrisp(tone: tone) }
@@ -224,6 +225,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.model.isWorking = false
             }
         } catch { await fail(error) }
+    }
+
+    /// Closes the panel. If a recording is in progress it is cancelled and
+    /// discarded, so closing never leaves the microphone running.
+    private func closePanel() {
+        if recorder.isRecording {
+            _ = recorder.stop()
+            recorder.onAudioBufferCaptured = nil
+            transcriber.cancel()
+            lastTranscript = ""
+            DebugLog.write("AppDelegate.closePanel cancelledRecording")
+        }
+        statusItem.button?.title = "🎙️"
+        panel.dismiss()
+    }
+
+    /// Copies text the user explicitly chose to the clipboard. Never writes
+    /// the text to `DebugLog`.
+    private func copyToClipboard(_ text: String) {
+        Pasteboard().setString(text)
+        model.didCopy = true
+        DebugLog.write("AppDelegate.copyToClipboard textLength=\(text.count)")
     }
 
     private func send(_ text: String) {
@@ -282,6 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let presentation = errorPresenter.present(error)
         await MainActor.run {
             self.model.isWorking = false
+            self.model.hasFailed = true
             self.model.status = "Error: \(presentation.userMessage)"
         }
     }
