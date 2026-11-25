@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DebugLog.write("AppDelegate.applicationDidFinishLaunching")
         DebugLog.write("AppDelegate.bundlePath path=\(Bundle.main.bundlePath)")
         DebugLog.write("AppDelegate.bundleIdentifier id=\(Bundle.main.bundleIdentifier ?? "nil")")
+        ToolPath.applyToProcessEnvironment()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleRewriteConfigurationChanged(_:)),

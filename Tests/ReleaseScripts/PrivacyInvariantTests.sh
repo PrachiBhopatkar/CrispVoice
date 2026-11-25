@@ -221,8 +221,11 @@ require_pattern "$troubleshooting" \
   "CrispVoice never starts (an? )?(SSO|Midway)" \
   "the statement that CrispVoice never initiates SSO/Midway login"
 require_pattern "$troubleshooting" \
-  "CrispVoice.{0,20}(never|does not|doesn't) repair.{0,10}PATH" \
-  "the statement that CrispVoice never repairs PATH"
+  "appends these folders to its own .PATH." \
+  "the description of CrispVoice's fixed PATH extension"
+require_pattern "$troubleshooting" \
+  "does not invoke a login shell" \
+  "the statement that CrispVoice does not start a login shell"
 
 reject_pattern "$troubleshooting" \
   "(always|all traffic) (remains|stays|is kept) (in|within) (a single Region|us-west-2)" \

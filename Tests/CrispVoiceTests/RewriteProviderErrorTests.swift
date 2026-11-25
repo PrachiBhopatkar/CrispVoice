@@ -34,6 +34,14 @@ final class RewriteProviderErrorTests: XCTestCase {
         XCTAssertEqual(codes.count, 7)
     }
 
+    func test_credentialsUnavailable_namesBothExpiredLoginAndUnlaunchableHelper() {
+        let message = RewriteProviderError.credentialsUnavailable.errorDescription ?? ""
+
+        XCTAssertTrue(message.localizedCaseInsensitiveContains("expired"))
+        XCTAssertTrue(message.localizedCaseInsensitiveContains("credential helper"))
+        XCTAssertTrue(message.contains("docs/troubleshooting.md"))
+    }
+
     func test_allSevenCases_haveActionableSafeLocalizedMessages() {
         for error in Self.allCases {
             guard let message = error.errorDescription, !message.isEmpty else {

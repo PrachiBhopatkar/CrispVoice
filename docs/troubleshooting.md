@@ -2,7 +2,7 @@
 
 This page covers setup and connection problems for both rewrite providers, especially Amazon Bedrock's AWS-profile authentication. For what CrispVoice sends and where, see [docs/privacy.md](privacy.md).
 
-A guiding rule for everything below: **CrispVoice never starts an SSO or Midway login on your behalf, and CrispVoice does not repair your PATH or reconfigure your shell.** If a standard AWS profile isn't usable by a GUI app yet, that is something you or your AWS administrator make usable — CrispVoice only resolves the profile you already have configured.
+A guiding rule for everything below: **CrispVoice never starts an SSO or Midway login on your behalf, and CrispVoice does not start a shell or reconfigure your shell.** At launch it only appends a short, fixed list of standard tool folders to its own `PATH` (see below). If a standard AWS profile isn't usable by a GUI app yet, that is something you or your AWS administrator make usable — CrispVoice only resolves the profile you already have configured.
 
 ## "Your AWS session is unavailable or expired"
 
@@ -71,7 +71,9 @@ If `aws sts get-caller-identity` or a Bedrock `Converse` call succeeds when you 
    Find the absolute path with `which <command-name>` in Terminal.
 3. Save the file and select Test Connection in CrispVoice Settings again.
 
-CrispVoice does not invoke a login shell, extend `PATH`, or search common installation directories on your behalf — an absolute path in the profile is the reliable fix so the same profile works identically whether launched from Terminal or from Finder/LaunchServices.
+To cover the common case, CrispVoice appends these folders to its own `PATH` at launch, after the existing entries, and only if they exist on your Mac: `~/.toolbox/bin`, `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`. A `credential_process` helper installed in one of them is found even when CrispVoice is opened from Finder, Spotlight, or the Dock.
+
+CrispVoice does not invoke a login shell, read your shell startup files, or search any other installation directories on your behalf. If your helper lives somewhere else, an absolute path in the profile is the reliable fix so the same profile works identically whether launched from Terminal or from Finder/LaunchServices.
 
 ## Nothing here solved it
 

@@ -43,7 +43,7 @@ enum RewriteProviderError: LocalizedError, Equatable {
         case .missingConfiguration:
             return "Choose an AWS Region and model in Settings before using this rewrite provider."
         case .credentialsUnavailable:
-            return "Your AWS session is unavailable or has expired. Refresh your normal AWS or company login, then try again."
+            return "CrispVoice couldn't get AWS credentials. Your login may have expired, or your profile's credential helper may not be launchable from the app. Refresh your normal AWS or company login, then try again. See docs/troubleshooting.md."
         case .accessDenied:
             return "The selected AWS role doesn't have permission to use this model or inference profile. Contact your AWS administrator."
         case .invalidModelOrRegion:

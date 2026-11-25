@@ -23,6 +23,8 @@ Resolving your selected AWS profile's credentials may contact AWS SSO/OIDC/STS e
 
 A configured `credential_process` is trusted user/administrator configuration external to CrispVoice. CrispVoice does not control, and cannot guarantee, that external process's own network destinations, storage, or logging behavior — only that CrispVoice itself never sends it transcript or rewrite content.
 
+At launch, CrispVoice appends a fixed list of standard tool folders (`~/.toolbox/bin`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`) to its own process `PATH`, only if they exist, after the existing entries. This lets a `credential_process` helper named without a full path be found when the app is opened from Finder. It does not start a shell, read shell or AWS configuration, or send any content anywhere.
+
 ### Midway: a validated office example, not a CrispVoice dependency
 
 Some organizations issue AWS credentials through an internal identity system exposed to the AWS CLI as a `credential_process`. A company Midway login is one such example, and it is the validated office example CrispVoice's Bedrock support was tested against. CrispVoice does not implement, bundle, depend on, or require Midway or any other company-internal authentication system, and it never starts an SSO or Midway login on your behalf. If your organization uses Midway, a similar system, or a different `credential_process`, CrispVoice authenticates through whatever standard AWS profile you configure; CrispVoice has no built-in knowledge of Midway or any company-internal identity system beyond the standard `credential_process` interface AWS defines.
