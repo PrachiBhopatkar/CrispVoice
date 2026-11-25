@@ -9,6 +9,7 @@ import SwiftUI
 enum AppDelegateError: LocalizedError {
     case microphoneAccessDenied
     case missingAnthropicAPIKey
+    case accessibilityRequired
 
     /// A stable diagnostic category safe to write to `DebugLog`.
     var diagnosticCode: String {
@@ -17,6 +18,8 @@ enum AppDelegateError: LocalizedError {
             return "microphone_access_denied"
         case .missingAnthropicAPIKey:
             return "missing_anthropic_api_key"
+        case .accessibilityRequired:
+            return "accessibility_required"
         }
     }
 
@@ -26,6 +29,8 @@ enum AppDelegateError: LocalizedError {
             return "Enable Microphone access for CrispVoice in System Settings to dictate."
         case .missingAnthropicAPIKey:
             return "Set your Anthropic API key in Settings to continue."
+        case .accessibilityRequired:
+            return "CrispVoice needs Accessibility permission to paste into other apps. Turn it on for CrispVoice in System Settings, then press the hotkey again."
         }
     }
 }
@@ -109,6 +114,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else {
             guard PermissionsManager.hasAccessibility() else {
+                let presentation = errorPresenter.present(AppDelegateError.accessibilityRequired)
+                model.isWorking = false
+                model.variants = []
+                model.status = presentation.userMessage
+                panel.present()
                 PermissionsManager.openAccessibilitySettings()
                 return
             }

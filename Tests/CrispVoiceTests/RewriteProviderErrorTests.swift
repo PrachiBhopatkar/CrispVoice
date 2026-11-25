@@ -319,6 +319,19 @@ final class SafeErrorPresenterTests: XCTestCase {
         XCTAssertNotEqual(presentation.userMessage, "Something went wrong. Please try again.")
     }
 
+    func test_present_accessibilityRequired_showsItsOwnMessage_notTheGenericFallback() {
+        var writes: [String] = []
+        let presenter = SafeErrorPresenter(writeDiagnostic: { writes.append($0) })
+
+        let presentation = presenter.present(AppDelegateError.accessibilityRequired)
+
+        XCTAssertEqual(writes, ["AppDelegate.fail code=accessibility_required"])
+        XCTAssertEqual(presentation.diagnosticCode, "accessibility_required")
+        XCTAssertEqual(presentation.userMessage, AppDelegateError.accessibilityRequired.errorDescription)
+        XCTAssertTrue(presentation.userMessage.contains("Accessibility"))
+        XCTAssertNotEqual(presentation.userMessage, "Something went wrong. Please try again.")
+    }
+
     func test_present_missingAnthropicAPIKey_restoresAnthropicSpecificMessage_notTheBedrockConfigurationMessage() {
         var writes: [String] = []
         let presenter = SafeErrorPresenter(writeDiagnostic: { writes.append($0) })
